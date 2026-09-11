@@ -1,0 +1,17 @@
+# Nothing here is ever line-ending converted.
+#
+# The suite proves that every committed .bf is byte for byte what tools/bfgen
+# makes of its skeleton, and that every .bf contains only the eight brainfuck
+# command bytes and whitespace. A CRLF checkout breaks the first check on every
+# fixture at once while leaving the second green, because \r is whitespace and
+# is not a command byte -- so the symptom points at the expander, which is
+# fine, and says nothing about the clone that actually caused it.
+#
+# The protocol makes it worse than it is in the sibling: brainstem's frames are
+# binary, and a fixture that emits 0x0a is emitting a length byte or a payload
+# byte, not a line ending. Anything that rewrites 0x0a on the way to disk is
+# corrupting data, not formatting text.
+#
+# So autocrlf is refused here rather than left to whatever the clone was
+# configured with.
+* -text

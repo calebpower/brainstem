@@ -1,0 +1,45 @@
+# brainstem reaper tenant.
+#
+# Two guests, because brainstem targets two kernels and its central claim is
+# that the wire is the same on both. reaper runs one session per guest, so the
+# suite gates on freebsd-15.1 AND ubuntu-26.04 and a change is not landed until
+# both are green. FreeBSD is the primary target and Linux second; that order is
+# a statement about which failure is the more serious, not about which runs
+# first.
+#
+# Host execution rather than a container, on both. freebsd-15.1 is host-exec
+# only and has no container engine at all, so a container lane could not be the
+# gate even if Linux alone were the target. It is also the honest arrangement
+# for a program whose entire job is to make syscalls: it binds loopback
+# sockets, spawns processes and opens files, and a hardened runtime's default
+# seccomp profile would filter some of that. The guest is disposable, which is
+# what makes that acceptable.
+schema = 1
+project = "brainstem"
+
+guests = ["freebsd-15.1", "ubuntu-26.04"]
+exec = "host"
+
+[build]
+cmd = "sh tools/guest-setup.sh"
+
+[run]
+# No pipe into tee: /bin/sh may be dash (no pipefail, no PIPESTATUS) and the
+# suite's exit status is the whole point. Redirect, capture the real status,
+# echo the log for the live view, then re-raise.
+cmd = "sh tests/run.sh > \"$REAPER_OUT\"/suite.log 2>&1; s=$?; cat \"$REAPER_OUT\"/suite.log; exit $s"
+
+[sync]
+# Never copy host-built binaries onto a guest. bfsodium learned this as "a
+# FreeBSD-built bfi looks present to the rebuild and then fails to exec"; with
+# two guests it now bites in BOTH directions, and a stale ELF on the FreeBSD
+# guest is the same defect wearing the other hat.
+#
+# One directory is excluded rather than a list of binary names, deliberately:
+# a list rots the moment a tool is added, and the omission is invisible until
+# the day it matters. Everything compiled lands in build/.
+exclude = ["/build/", "/out/", "/.git/"]
+
+[resources]
+cores = 2
+ram_gb = 4

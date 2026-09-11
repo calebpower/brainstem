@@ -1,0 +1,14 @@
+# Everything the compiler makes — the sources of truth are tools/*.c and src/*.c
+#
+# One directory rather than a list of binary names, because a list rots the
+# moment a tool is added and the omission is invisible. .reaper.toml excludes
+# the same path from its sync for the same reason.
+/build/
+
+# reaper run artifacts collected back from the guest, and the container lane's
+# copy of the same log
+/out/
+
+# Trace files from `brainstem --trace`, which are run artifacts and not inputs.
+# Frames that are test INPUTS live in tests/vec/ as hex, and are committed.
+*.trace
