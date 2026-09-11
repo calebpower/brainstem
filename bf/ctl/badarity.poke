@@ -1,0 +1,10 @@
+# badarity.poke -- a hello one byte short.
+#
+# The dispatcher checks the length against the op table BEFORE the handler
+# runs, so this never reaches op_ctl_hello. Strict arity is the anti desync
+# mechanism: the realistic catastrophic failure of this protocol is not a
+# deadlock but a program that under reads a reply and shifts every frame
+# after it, and an exact length turns that into a loud failure within a
+# frame or two.
+EMIT 01 09 00 42 53 54 4d 01 00 00 00 00
+READ 3

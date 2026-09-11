@@ -1,0 +1,14 @@
+# unknownop.poke -- an opcode this broker does not implement is RECOVERABLE.
+#
+# Every frame is length prefixed, so the broker consumes the payload and the
+# stream stays in step. That is the forward compatibility path for a program
+# written against a later minor version, and making it fatal would destroy
+# it. This program asks for op 0x7e, is told NOSUCHOP, and carries on to
+# exit cleanly -- which is the whole point.
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   op 7e does not exist; the reply is a bare status with no payload
+EMIT 7e 00 00
+READ 3
+EMIT 02 01 00 00
+READ 3

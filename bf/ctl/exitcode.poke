@@ -1,0 +1,11 @@
+# exitcode.poke -- the program chooses the broker's exit status.
+#
+# ctl.exit replies OK first and the broker exits afterwards, which keeps
+# "exactly one reply per request" with no special case. That invariant is
+# the whole deadlock proof, so it has no exceptions -- not even for the op
+# whose entire job is to end the conversation.
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   exit 3
+EMIT 02 01 00 03
+READ 3

@@ -1,0 +1,18 @@
+# hello.poke -- shake hands with the broker and exit cleanly.
+#
+# The smallest complete brainstem program, and the one that proves the whole
+# idea: a file containing nothing but the eight brainfuck instructions,
+# running under a general purpose interpreter, reaching an operating system.
+#
+# Frames transcribed by hand from ABI.md sections 3 and 7.2.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+#   the reply is status{1} len{2} then the 48 byte record: 51 bytes, and
+#   npreopen is 0 here so there is no name tail after it
+READ 51
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+#   exit still answers, because every request gets exactly one reply --
+#   that invariant is the whole deadlock proof, so it has no exceptions
+READ 3

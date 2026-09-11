@@ -55,5 +55,12 @@ $CC $CFLAGS -o build/hx  tools/hx.c
 $CC $CFLAGS -o build/bscodec tools/bscodec.c src/frame.c src/err.c
 # shellcheck disable=SC2086
 $CC $CFLAGS -o build/bsframe tools/bsframe.c
+# shellcheck disable=SC2086
+$CC $CFLAGS -o build/bsbf    tools/bsbf.c
+
+# The broker itself. src/ holds the product; tools/ holds the checkers, and
+# the audit tier at M7 leans on that separation.
+# shellcheck disable=SC2086
+$CC $CFLAGS -o build/brainstem     src/main.c src/broker.c src/child.c src/ops.c src/op_ctl.c     src/frame.c src/err.c
 
 echo "build: done"

@@ -6,19 +6,30 @@ is actually built and where it has already bitten.
 
 ## State
 
-**Milestone M1. M0 was gated at 22 pass, 0 fail on `freebsd-15.1` and
-`ubuntu-26.04`; M1 has not been gated yet.**
+**Milestone M2 — the thesis holds.** A file containing nothing but the eight
+brainfuck instructions, run under a general purpose interpreter, reaches an
+operating system and comes back.
 
-There is still no broker, and nothing has yet spoken the protocol. What M1
-adds is the codec underneath it: `src/frame.c` encodes and decodes a frame,
-`src/errs.def` is the one status table, and `tools/bsframe.c` is a SECOND
-implementation of the same specification with no shared code, so every codec
-assertion has two oracles behind it.
+    > 01 len=10     hello
+    < 00 len=48     OK, the 48 byte record
+    > 02 len=1      exit 0
+    < 00 len=0      OK
 
-That is deliberately the first thing built. It touches no descriptor and no
-platform, so nothing in it can fail for a platform reason and a codec bug can
-never be mistaken for a pipe bug — which is exactly the confusion M2 would
-otherwise start in.
+M0 was gated at 22 pass, 0 fail on both guests. M1 and M2 stand at **94 pass,
+0 fail on the container lane and have not been gated**, so the FreeBSD half
+of both is unproven.
+
+Two of the twenty three ops are built: `ctl.hello` and `ctl.exit`. The other
+twenty one are declared in `src/ops.def` with a NULL handler and answer
+NOSUCHOP, which is recoverable — the payload is consumed and the stream stays
+in step, because that is the forward compatibility path for a program written
+against a later minor version.
+
+`ctl` was chosen for M2 precisely because it does not cross the platform
+seam. The pipe topology, the half duplex discipline, the deadlock proof and
+the buffering diagnosis are all settled now, once, with no platform surface
+to confuse the result — and twenty one more ops will inherit a channel that
+has already been proved.
 
 That ordering was deliberate — the first commit has to be green on the machine
 of record, and you cannot claim that without the lane that runs it. It also
@@ -62,21 +73,21 @@ marker in the suite at all.
 
 | tier | built | run.sh lines | what it is |
 |---|---|---|---|
-| 0 | yes | 3 | checker self-tests |
+| 0 | yes | 5 | checker self-tests |
 | 1 | yes | 17 | interpreter self-test, all three EOF modes |
-| 2 | no | 0 | the program is still brainfuck — needs bsbf and fixtures |
-| 3 | no | 0 | fixture regeneration — needs bfgen |
-| 3a | no | 0 | fixture legibility |
-| 3b | no | 0 | the header does not lie |
+| 2 | yes | 1 | the program is still brainfuck |
+| 3 | yes | 1 | fixture regeneration |
+| 3a | yes | 2 | fixture legibility, and the expander knows no ABI |
+| 3b | no | 0 | the header does not lie — needs bsframe --decode wiring |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | no | 0 | per-op round trip — needs the broker |
-| 6 | no | 0 | error paths |
-| 7 | no | 0 | determinism and replay |
-| 8 | no | 0 | interpreter semantics matrix |
-| 9 | no | 0 | deadlock and timeout |
-| 10 | no | 0 | platform parity |
-| 10a | no | 0 | per-op syscall surface |
-| 10b | no | 0 | the seam is narrow |
+| 5 | yes | 3 | per-op round trip |
+| 6 | yes | 7 | error paths |
+| 7 | no | 0 | determinism and replay — needs the clock and rng ops |
+| 8 | yes | 1 | interpreter semantics matrix |
+| 9 | yes | 4 | deadlock and timeout |
+| 10 | no | 0 | platform parity — needs the seam, M3 |
+| 10a | no | 0 | per-op syscall surface — needs the seam, M3 |
+| 10b | no | 0 | the seam is narrow — needs the seam, M3 |
 | 10c | yes | 6 | the tables and the lane definitions agree |
 | 11 | manual | 0 | mutation, a discipline rather than a check |
 | 12 | no | 0 | purity audit, M8 |

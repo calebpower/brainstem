@@ -1,0 +1,10 @@
+# nohello.poke -- an op before the handshake is fatal.
+#
+# ABI.md section 3.1: any op other than hello as the first frame answers
+# NOHELLO and the broker exits. Fatal rather than recoverable because a
+# program that has not agreed a version has not agreed what its own bytes
+# mean, and carrying on would be guessing.
+#
+#   exit  op 02, len 1, code 0 -- valid in itself, and refused here anyway
+EMIT 02 01 00 00
+READ 3

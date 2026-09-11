@@ -41,6 +41,8 @@ echo "== tier 0: checker self-tests =="
 run "bscodec self-test" ./build/bscodec --selftest
 run "bsframe self-test" ./build/bsframe --selftest
 run "bstier self-test" perl tools/bstier.pl --selftest
+run "bsbf self-test" ./build/bsbf --selftest
+run "brainstem self-test" ./build/brainstem --selftest
 
 # TIER 10c
 echo
@@ -260,6 +262,122 @@ run "the two implementations agree on every single byte value" sh -c '
         [ "$a" = "$b" ] || { echo "disagree on $v: $a vs $b"; rc=1; }
     done
     exit $rc'
+
+# TIER 2
+echo
+echo "== tier 2: the program is still brainfuck =="
+# The project's central claim, mechanised. No other tier can see it: every
+# other check asks what a fixture ACHIEVES, and one that achieved it with a
+# dialect extension would pass all of them while being unrunnable anywhere
+# but here.
+for f in bf/*/*.bf; do run "pure brainfuck $f" ./build/bsbf "$f"; done
+
+# TIER 3
+echo
+echo "== tier 3: the committed brainfuck is what its skeleton says =="
+# Paired with tier 2, this is what licenses the .poke to be the review
+# artifact: the .bf carries no prose, so if it were not provably the
+# expansion of something readable, nothing would be reviewable at all.
+for s in bf/*/*.poke; do
+    run "regenerates ${s%.poke}.bf" sh -c "sh tools/bfgen.sh '$s' | cmp -s - '${s%.poke}.bf'"
+done
+
+# TIER 3a
+echo
+echo "== tier 3a: a fixture can be reviewed =="
+# A .bf carries no comments by design, so the skeleton is the only place
+# review can happen, and a skeleton with no header is a fixture nobody can
+# check the intent of.
+run "every skeleton has a header naming what it does" sh -c '
+    rc=0
+    for s in bf/*/*.poke; do
+        head -1 "$s" | grep -q "^# " || { echo "$s has no header line"; rc=1; }
+    done
+    exit $rc'
+
+# The expander must stay ignorant of the ABI. This is the line between an
+# expander and a compiler, and it is the same shape of check as the one
+# guarding the lane definitions: if bfgen knew an op name or a length, the
+# fixtures would be generated from the same knowledge the broker is built
+# from, and a byte order bug would be invisible to the whole suite.
+run "the expander knows no opcode and no op name" sh -c '
+    body=$(grep -v "^[[:space:]]*#" tools/bfgen.sh)
+    ! printf "%s" "$body" | grep -Eqi "hello|ABI\.md|opcode|0x0[1-9]|BSTM"'
+
+# TIER 5
+echo
+echo "== tier 5: a standard brainfuck program completes a round trip =="
+# THE milestone. A file containing nothing but the eight instructions, run
+# under a general purpose interpreter, reaching an operating system.
+run "the handshake round trips and the program exits 0" sh -c '
+    ./build/brainstem -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1'
+run "the trace shows exactly the four frames" sh -c '
+    got=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf 2>&1 | grep -c "brainstem: [<>]")
+    test "$got" = 4'
+run "the program chooses the exit status" sh -c '
+    ./build/brainstem -- ./build/bfi bf/ctl/exitcode.bf >/dev/null 2>&1; test $? -eq 1'
+
+# TIER 6
+echo
+echo "== tier 6: error paths =="
+# Each declared failure, reached by a real program rather than asserted.
+run "an op before hello is fatal" sh -c '
+    ./build/brainstem -- ./build/bfi bf/ctl/nohello.bf >/dev/null 2>&1; test $? -eq 70'
+run "a bad magic is fatal" sh -c '
+    ./build/brainstem -- ./build/bfi bf/ctl/badmagic.bf >/dev/null 2>&1; test $? -eq 70'
+run "a wrong major version is fatal" sh -c '
+    ./build/brainstem -- ./build/bfi bf/ctl/badversion.bf >/dev/null 2>&1; test $? -eq 70'
+run "a wrong arity is refused before the handler runs" sh -c '
+    ./build/brainstem -- ./build/bfi bf/ctl/badarity.bf >/dev/null 2>&1; test $? -eq 70'
+run "an unknown opcode is recoverable" sh -c '
+    ./build/brainstem -- ./build/bfi bf/ctl/unknownop.bf >/dev/null 2>&1'
+run "an unknown opcode answers NOSUCHOP and the program carries on" sh -c '
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/unknownop.bf 2>&1 | grep -q "< 19 len=0"'
+
+# ABI.md invariant I6: an error reply carries no payload, ever. A program that
+# got a bad status reads exactly two more bytes, both zero, and is done.
+#
+# No current handler writes to the reply buffer and then fails, so the reset
+# in broker.c that enforces this is defence in depth rather than something
+# these cases can distinguish -- mutation checking says so plainly. It is
+# pinned anyway, because the invariant is what lets every fixture drain a
+# failure without knowing which failure it was, and the first handler that
+# builds a reply incrementally will make it load bearing.
+run "an error reply carries no payload" sh -c '
+    rc=0
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/badmagic.bf 2>&1 | grep -q "< e0 len=0" || rc=1
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/badarity.bf 2>&1 | grep -q "< e2 len=0" || rc=1
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/nohello.bf  2>&1 | grep -q "< e4 len=0" || rc=1
+    exit $rc'
+
+# TIER 8
+echo
+echo "== tier 8: the interpreter semantics matrix =="
+# Every fixture under each end of input convention. The fixture job is
+# unchanged and the interpreter varies within what brainfuck leaves
+# unspecified; a fixture that only works under one convention is one that
+# only works under our interpreter, and that is not brainfuck.
+run "the round trip holds under all three EOF conventions" sh -c '
+    rc=0
+    for m in unchanged zero minus1; do
+        BFI_EOF=$m ./build/brainstem -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1             || { echo "failed under BFI_EOF=$m"; rc=1; }
+    done
+    exit $rc'
+
+# TIER 9
+echo
+echo "== tier 9: deadlock and timeout =="
+# The defect this tier exists for is the project's worst: two processes each
+# waiting for the other produce no output, no core, and a CI line reading
+# "timed out", which points at everything except the cause. A suite that can
+# hang is a suite nobody will run, so every case here is bounded.
+run "a buffering interpreter is diagnosed, not hung" sh -c '
+    BFI_FLUSH=block ./build/brainstem --hello-timeout 1500 -- ./build/bfi bf/ctl/hello.bf         >/dev/null 2>&1; test $? -eq 71'
+run "the diagnosis names buffering as the cause" sh -c '
+    BFI_FLUSH=block ./build/brainstem --hello-timeout 1500 -- ./build/bfi bf/ctl/hello.bf 2>&1         | grep -q "buffering its stdout"'
+run "--check-interpreter accepts the vendored interpreter"     ./build/brainstem --check-interpreter ./build/bfi
+run "--check-interpreter rejects a buffering one" sh -c '
+    BFI_FLUSH=block ./build/brainstem --check-interpreter ./build/bfi >/dev/null 2>&1; test $? -eq 72'
 
 echo
 echo "== summary =="
