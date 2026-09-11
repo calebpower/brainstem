@@ -6,8 +6,8 @@ is actually built and where it has already bitten.
 
 ## State
 
-**Milestone M0. The suite is 22 pass, 0 fail on the Linux half. The FreeBSD
-half has never been run.**
+**Milestone M0, gated. 22 pass, 0 fail on `freebsd-15.1` and 22 pass, 0 fail on
+`ubuntu-26.04`.**
 
 There is no broker. `src/` is empty. What exists is the ground: two lanes, one
 toolchain definition, one build definition, the vendored interpreter, the five
@@ -18,12 +18,25 @@ of record, and you cannot claim that without the lane that runs it. It also
 front-loads the discovery that `ubuntu-26.04` ships neither `gcc` nor `make`,
 which is a bad thing to find during the first interesting milestone.
 
-**The FreeBSD half is the honest gap in this commit.** reaper was unreachable
-from the development host — a Windows box on a separate network — so
-`guest-setup.sh`'s FreeBSD branch, the `ktrace`/`kdump` presence check, and
-every `uname`-dependent path have been written but never executed. Whoever
-first runs `reaper test` should treat a failure on `freebsd-15.1` as this
-commit's bug rather than theirs.
+**The FreeBSD half was written blind and passed first time.** reaper is
+unreachable from the development host — a Windows box on a separate network —
+so `guest-setup.sh`'s FreeBSD branch, the `ktrace`/`kdump` presence check and
+every `uname`-dependent path were committed unexecuted, with the expectation
+that something would break. Nothing did: `freebsd-15.1` came back 22 pass, 0
+fail on the first run, as did `ubuntu-26.04`.
+
+The specific predictions that were wrong are worth recording, because they are
+the ones to stop worrying about: `-std=c99` setting `__STRICT_ANSI__` and
+hiding `<sys/socket.h>` (the feature macros in `build.sh` already cover it),
+BSD `sed` differing on the `# GUEST` marker parse, `mktemp -d` with no
+template, and `timeout` being absent from base. All four are fine.
+
+**What this does not mean.** M0 compiles two C files and runs an interpreter;
+it touches no socket, no clock and no syscall the seam will care about. The
+platform divergence this project actually has to survive — `arc4random_buf`
+against `getrandom`, `AF_INET6` being 28 here and 10 there, `O_CREAT` being
+`0x0200` and `0x0040` — is all still ahead, and lands at M3. Do not read a
+green M0 as evidence the seam will be easy.
 
 ## Why this project exists, since the name is not obvious
 
@@ -151,12 +164,18 @@ for.
 ## Known soft spots
 
 - **Two copies of the interpreter can drift.** `tools/bfi.c` is vendored from
-  bfsodium at commit `e98794f` with three documented deltas, and **no check
-  inside this repository can detect divergence from upstream.** The mitigation
-  is a periodic manual diff. The suite does pin the one delta that matters — if
-  someone tidies the `setvbuf` line away, a check fails rather than a hang
-  appearing. `tools/hx.c` is verbatim and can be diffed directly.
-- **The FreeBSD lane is unexecuted**, as above.
+  bfsodium at commit `e98794f`, and **no check inside this repository can
+  detect divergence from upstream.** The mitigation is a periodic manual diff.
+  The suite does pin the one delta that matters — if someone tidies the
+  `setvbuf` line away, a check fails rather than a hang appearing.
+  `tools/hx.c` is verbatim and can be diffed directly.
+
+  The delta count is **shrinking**. bfsodium has accepted the `setvbuf` fix on
+  a branch of its own, with a test that catches the buffering directly: a
+  program that writes one byte and then spins forever, killed by `timeout`
+  with SIGTERM, which does not flush. Once that lands, this copy's deltas are
+  the two test knobs — `BFI_EOF` and `BFI_FLUSH` — which exist for tier 8 and
+  have no reason to go upstream. Re-diff after it merges and update this note.
 - **Every tier past 1 and 10c is declared and absent.** That is expected at M0
   and it is written into `CONVENTIONS.md` §8 rather than left implicit, but do
   not let the declaration pass as coverage.

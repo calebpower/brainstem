@@ -37,6 +37,11 @@ it, the build has exactly one definition, the guests the gate will run are the
 ones the provisioning script knows, and the pinned interpreter is sound on both
 platforms in all three of brainfuck's end-of-input conventions.
 
+It is **gated**: 22 pass, 0 fail on `freebsd-15.1` and 22 pass, 0 fail on
+`ubuntu-26.04`. Read that for what it is — M0 compiles two C files and runs an
+interpreter. The platform divergence this project has to survive is all still
+ahead of it.
+
 ## The operations
 
 Twenty-three, specified in [ABI.md](ABI.md) and not yet implemented.
