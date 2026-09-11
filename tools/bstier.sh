@@ -159,7 +159,12 @@ check() {
 }
 
 fix() {
-    awk '
+    # The -v options come BEFORE the program text. POSIX awk takes operands
+    # after the program, so "awk 'prog' -v x=1 file" treats -v and x=1 as
+    # FILENAMES and then fails to open them. The first draft of this function
+    # had it the wrong way round and was never run, because the suite only
+    # calls check -- which is exactly how an untested code path stays broken.
+    awk -v suite="$SUITE" -v doc="$DOC" '
     FILENAME == suite {
         if ($0 ~ /^#[ \t]*TIER[ \t]/) {
             t = $0; sub(/^#[ \t]*TIER[ \t]*/, "", t); sub(/[ \t]*$/, "", t)
@@ -185,7 +190,7 @@ fix() {
         printf "| %s | %s | %d %s\n", id, b, c, rest
         next
     }
-    ' -v suite="$SUITE" -v doc="$DOC" "$SUITE" "$DOC" > "$DOC.new"
+    ' "$SUITE" "$DOC" > "$DOC.new"
     mv "$DOC.new" "$DOC"
     echo "bstier: $DOC rewritten"
 }
@@ -195,6 +200,7 @@ fix() {
 selftest() {
     _st_fails=0
     _st_n=0
+    _st_here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
     _st_root=$(mktemp -d)
     trap 'rm -rf "$_st_root"' EXIT INT TERM
 
@@ -270,6 +276,52 @@ run "c" true
 ' '# TIER 1
 for f in a b c; do run "x $f" true; done
 '
+
+    # --fix has its own case, because it had a bug for its whole existence
+    # and nothing noticed: the suite only ever calls check, so the repair path
+    # was never executed. A stale count must become correct, and a correct
+    # table must come out byte for byte unchanged.
+    _st_n=$((_st_n + 1))
+    _f_d="$_st_root/case$_st_n"
+    mkdir -p "$_f_d/tests"
+    {   printf '## 8. Testing protocol
+
+| Tier | Q | How |
+|---|---|---|
+'
+        printf '| 1 interpreter self-test | a | b |
+'
+        printf '| 6 differential fuzz | a | b |
+'
+        printf '| 11 mutation | a | b |
+
+### Named non-goals
+'
+    } > "$_f_d/$CONV"
+    printf '#!/bin/sh
+%s' "$_good_suite" > "$_f_d/$SUITE"
+    {   printf '## State
+
+| tier | built | run.sh lines | note |
+|---|---|---|---|
+'
+        printf '| 1 | yes | 99 | x |
+| 6 | no | 0 | x |
+| 11 | manual | 0 | x |
+
+tail
+'
+    } > "$_f_d/$DOC"
+    if check "$_f_d" >/dev/null 2>&1; then
+        echo "SELFTEST FAIL: a stale count was not caught before --fix"; _st_fails=$((_st_fails+1))
+    fi
+    ( cd "$_f_d" && sh "$_st_here/bstier.sh" --fix >/dev/null 2>&1 ) || true
+    if check "$_f_d" >/dev/null 2>&1; then echo "selftest ok: --fix repairs a stale count"
+    else echo "SELFTEST FAIL: --fix did not repair a stale count"; _st_fails=$((_st_fails+1)); fi
+    cp "$_f_d/$DOC" "$_f_d/doc.again"
+    ( cd "$_f_d" && sh "$_st_here/bstier.sh" --fix >/dev/null 2>&1 ) || true
+    if cmp -s "$_f_d/$DOC" "$_f_d/doc.again"; then echo "selftest ok: --fix is idempotent"
+    else echo "SELFTEST FAIL: --fix is not idempotent"; _st_fails=$((_st_fails+1)); fi
 
     if [ "$_st_fails" -gt 0 ]; then echo "SELFTEST FAILED ($_st_fails)"; return 1; fi
     echo "bstier --selftest: ok"
