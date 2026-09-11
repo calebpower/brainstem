@@ -28,30 +28,39 @@ is also what makes the broker indifferent to which language is on the far end.
 
 ## Status
 
-**Nothing works yet.** This is milestone M0: the two test lanes, the vendored
-interpreter, the documents, and a suite that proves the ground is solid. There
-is no broker. `src/` is empty.
+**It works, for two of twenty three operations.** A file containing nothing but
+the eight brainfuck instructions, run under a general purpose interpreter,
+reaches an operating system and comes back:
 
-That ordering is deliberate. The first commit has to be green on the machine of
-record, and you cannot claim that without the lane that runs it.
+```
+> 01 len=10     hello
+< 00 len=48     OK, the 48 byte record
+> 02 len=1      exit 0
+< 00 len=0      OK
+```
 
-What M0 does prove: the toolchain has exactly one definition and both lanes use
-it, the build has exactly one definition, the guests the gate will run are the
-ones the provisioning script knows, and the pinned interpreter is sound on both
-platforms in all three of brainfuck's end-of-input conventions.
+Milestone M2, **gated: 94 pass, 0 fail on `freebsd-15.1` and on
+`ubuntu-26.04`.**
 
-It is **gated**: 22 pass, 0 fail on `freebsd-15.1` and 22 pass, 0 fail on
-`ubuntu-26.04`. Read that for what it is — M0 compiles two C files and runs an
-interpreter. The platform divergence this project has to survive is all still
-ahead of it.
+`ctl.hello` and `ctl.exit` are built. The other twenty one are declared and
+answer NOSUCHOP, which is recoverable — the payload is consumed and the stream
+stays in step, because that is the forward compatibility path for a program
+written against a later version.
+
+Read that for what it is. `ctl` was chosen first precisely because it crosses
+no platform boundary, so what M2 proves is the *channel*: the pipe topology,
+the half duplex discipline that the deadlock proof rests on, and the
+diagnosis for the interpreter buffering defect. Sockets, clocks, files and
+processes are all still ahead, and the platform seam they need lands at M3.
 
 ## The operations
 
-Twenty-three, specified in [ABI.md](ABI.md) and not yet implemented.
+Twenty-three, specified in [ABI.md](ABI.md). Two are built; the rest answer
+NOSUCHOP until their milestone.
 
 | | |
 |---|---|
-| `hello` `exit` | handshake, version negotiation, teardown |
+| `hello` `exit` | **built** — handshake, version negotiation, teardown |
 | `clock_now` | realtime and monotonic |
 | `random_bytes` | |
 | `socket` `connect` `bind` `listen` `accept` | |

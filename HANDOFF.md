@@ -15,9 +15,12 @@ operating system and comes back.
     > 02 len=1      exit 0
     < 00 len=0      OK
 
-M0 was gated at 22 pass, 0 fail on both guests. M1 and M2 stand at **94 pass,
-0 fail on the container lane and have not been gated**, so the FreeBSD half
-of both is unproven.
+**Gated: 94 pass, 0 fail on `freebsd-15.1` and 94 pass, 0 fail on
+`ubuntu-26.04`.** M0 was 22 on both.
+
+Getting there cost three portability defects and they are recorded under
+*Traps* below, because all three had the same shape and the next one will
+too.
 
 Two of the twenty three ops are built: `ctl.hello` and `ctl.exit`. The other
 twenty one are declared in `src/ops.def` with a NULL handler and answer
@@ -186,6 +189,31 @@ accident, and the tree then claims coverage of a platform nobody provisioned
 for.
 
 ## Traps that have actually bitten
+
+- **THE PATTERN, three for three: the development host and the container agree
+  with each other, and the primary platform disagrees with both.** Every
+  portability defect this project has had took that shape, and two of the three
+  were invisible to everything runnable from the development box.
+
+  `strtonum()` in `bfgen` is a gawk extension: Git Bash has gawk and ran it,
+  the container has mawk and did not. That one was caught by the two lanes
+  disagreeing. BSD `wc` right aligns its output with leading spaces, so
+  `"  131076"` was compared against `"131076"` and passed on Linux for the
+  wrong reason; `${#a}` has no such opinion. And `bstier` was perl, which
+  FreeBSD has not shipped in base for years — the sharpest of the three,
+  because the container image turns out to HAVE perl at `/usr/bin/perl`, which
+  is exactly why it looked fine on the only lane that could be tested locally.
+
+  The lesson is not "be careful with awk". It is that **a green container run
+  is not evidence about FreeBSD**, and the two guest gate earns its keep at
+  precisely the moment someone is tempted to skip it. Expect the next one at
+  M3, where the seam starts and this class of defect lives by definition.
+
+- **An untested code path stays broken.** `bstier --fix` passed its `-v`
+  options after the awk program, so awk read them as filenames. It had been
+  that way since it was written, because the suite only ever calls `check`.
+  Every checker here self tests; that is no use if the self test covers half
+  the tool.
 
 - **A check that forbids a token will trip over the comment explaining the
   ban.** The first version of "the container lane installs nothing of its own"
