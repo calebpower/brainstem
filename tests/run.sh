@@ -91,10 +91,16 @@ echo "== tier 1: interpreter self-test =="
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
+# The expected output goes in a FILE, and that is not stylistic. The first
+# version of this piped the interpreter into `cmp -s - /dev/stdin` with the
+# expectation in a heredoc -- at which point the heredoc IS cmp's stdin, both
+# `-` and /dev/stdin name it, cmp compares it with itself, and the
+# interpreter's output is discarded unexamined. It passed for a program that
+# printed nothing. Mutation checking caught it; nothing else would have.
 printf '%s' '++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.' > "$tmp/hello.bf"
-run "hello world" sh -c "\"$bfi\" \"$tmp/hello.bf\" </dev/null | cmp -s - /dev/stdin <<'EOT'
-Hello World!
-EOT"
+printf 'Hello World!\n' > "$tmp/hello.want"
+run "hello world" sh -c "
+    \"$bfi\" \"$tmp/hello.bf\" </dev/null | cmp -s - \"$tmp/hello.want\""
 
 # Binary transparency. A protocol carries 0x00 and 0x0a as ordinary payload,
 # so an interpreter that translates either is unusable here -- and the failure
