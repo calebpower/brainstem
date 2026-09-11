@@ -1,27 +1,30 @@
 # brainstem #
 
-A syscall runtime for **standard** brainfuck: sockets, clocks, randomness,
-files and processes, reached over stdin and stdout through a host broker.
+A syscall broker for esoteric languages: sockets, clocks, randomness, files and
+processes, reached over stdin and stdout **without extending the language**.
 
-WASI for brainfuck. Yes, really.
+WASI for esolangs. brainfuck is the first client. Yes, really.
 
 ## What
 
-Brainfuck has eight instructions and two of them are I/O: `,` reads a byte and
-`.` writes one. That is the whole interface to the world, and it is why every
-attempt to make the language useful has extended it — SystemF adds a `%`
-instruction, Brainfuck++ and NetFuck add more. Extending the language is the
-easy answer and it gives up the only interesting property brainfuck has.
+An esoteric language's interface to the world is usually one byte in and one
+byte out, and often not even that. Brainfuck is the sharp case: eight
+instructions, of which `,` reads a byte and `.` writes one. That is the whole
+of it, and it is why almost every attempt to make such a language useful has
+**extended** it — SystemF adds a `%` instruction to brainfuck, Brainfuck++ and
+NetFuck add more. Extending is the easy answer and it gives up the only
+interesting property these languages have.
 
-brainstem does not extend anything. A program speaks a byte protocol through
-the `,` and `.` it already has, and a broker on the other end of the pipe
-turns those bytes into syscalls. **The program remains standard brainfuck**:
-the same file runs unmodified under any conforming interpreter, where it reads
-end-of-input and does nothing, because there is nobody there.
+brainstem extends nothing. A program speaks a byte protocol through the I/O it
+already has, and a broker on the other end of the pipe turns those bytes into
+syscalls. **The program stays in the unextended language**: the same file runs
+under any conforming implementation, where it reads end-of-input and does
+nothing, because there is nobody there.
 
 The broker is C99 with no dependencies. It spawns an interpreter of your
 choosing — it embeds none and requires none in particular — and talks to the
-program through it.
+program through it. That indirection is what makes the claim checkable, and it
+is also what makes the broker indifferent to which language is on the far end.
 
 ## Status
 
@@ -53,8 +56,34 @@ Twenty-three, specified in [ABI.md](ABI.md) and not yet implemented.
 | `random_bytes` | |
 | `socket` `connect` `bind` `listen` `accept` | |
 | `read` `write` `close` `poll` | files, pipes and sockets alike |
-| `pipe` `spawn` `wait` | **which is how a brainfuck program drives another one** |
+| `pipe` `spawn` `wait` | **which is how one program drives another** |
 | `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | |
+
+## Other languages
+
+Nothing in the broker knows what brainfuck is. It spawns an interpreter, writes
+bytes to its stdin and reads bytes from its stdout; the protocol is a byte
+stream and the ABI is flat fixed-width records. **A language qualifies if it
+can read a byte, write a byte, and loop** — which is most of them, including
+several that have little else.
+
+Two requirements, and only one is about the language:
+
+- It must be able to emit and consume arbitrary bytes, `0x00` included.
+- Its **implementation** must not buffer its output — a byte written must reach
+  the pipe before the program next blocks on a read. That is [ABI.md](ABI.md)
+  requirement I1, it is the single most common way to get a silent deadlock,
+  and `brainstem --check-interpreter` tests for it directly.
+
+The honest caveat: the protocol is *portable* to other languages but *tuned* to
+brainfuck. A zero byte is free to emit in brainfuck and bit manipulation is
+ruinously expensive, so the ABI is full of zero padding and spends a whole byte
+where a flag bit would do. Another language would find those choices harmless
+rather than helpful, and might reasonably have wanted a denser encoding. The
+wire format will not be re-cut per language.
+
+**No work is scheduled for this.** It is a property of the design rather than a
+plan, recorded so nobody assumes the opposite.
 
 ## Documentation
 
@@ -95,11 +124,11 @@ is no container lane that could cover the primary target.
 
 ## Safety
 
-**brainstem is not a sandbox.** It hands a brainfuck program the filesystem,
-the network and process spawn, with the broker's own credentials. The
-capability model — nothing is reachable that was not named on the command line
-— is a usability feature and a foundation for later enforcement, not a
-containment claim. Do not run brainfuck you did not write.
+**brainstem is not a sandbox.** It hands the program the filesystem, the
+network and process spawn, with the broker's own credentials. The capability
+model — nothing is reachable that was not named on the command line — is a
+usability feature and a foundation for later enforcement, not a containment
+claim. Do not run a program you did not write.
 
 It is also not fast, by construction. One byte per `.` through two pipes, and
 an interpreter that spends millions of instructions between syscalls.
