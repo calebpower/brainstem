@@ -45,4 +45,15 @@ $CC $CFLAGS -o build/bfi tools/bfi.c
 # shellcheck disable=SC2086
 $CC $CFLAGS -o build/hx  tools/hx.c
 
+# The codec, and the second reading of the specification that checks it.
+#
+# bscodec links src/frame.c and src/err.c; bsframe links NOTHING from src/ and
+# is compiled from one file on purpose. If a future edit makes bsframe need a
+# header out of src/, that is the moment the two stopped being independent and
+# the tier that compares them stopped meaning anything.
+# shellcheck disable=SC2086
+$CC $CFLAGS -o build/bscodec tools/bscodec.c src/frame.c src/err.c
+# shellcheck disable=SC2086
+$CC $CFLAGS -o build/bsframe tools/bsframe.c
+
 echo "build: done"

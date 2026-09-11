@@ -6,12 +6,19 @@ is actually built and where it has already bitten.
 
 ## State
 
-**Milestone M0, gated. 22 pass, 0 fail on `freebsd-15.1` and 22 pass, 0 fail on
-`ubuntu-26.04`.**
+**Milestone M1. M0 was gated at 22 pass, 0 fail on `freebsd-15.1` and
+`ubuntu-26.04`; M1 has not been gated yet.**
 
-There is no broker. `src/` is empty. What exists is the ground: two lanes, one
-toolchain definition, one build definition, the vendored interpreter, the five
-documents, and a suite that proves those things about themselves.
+There is still no broker, and nothing has yet spoken the protocol. What M1
+adds is the codec underneath it: `src/frame.c` encodes and decodes a frame,
+`src/errs.def` is the one status table, and `tools/bsframe.c` is a SECOND
+implementation of the same specification with no shared code, so every codec
+assertion has two oracles behind it.
+
+That is deliberately the first thing built. It touches no descriptor and no
+platform, so nothing in it can fail for a platform reason and a codec bug can
+never be mistaken for a pipe bug — which is exactly the confusion M2 would
+otherwise start in.
 
 That ordering was deliberate — the first commit has to be green on the machine
 of record, and you cannot claim that without the lane that runs it. It also
@@ -37,6 +44,42 @@ platform divergence this project actually has to survive — `arc4random_buf`
 against `getrandom`, `AF_INET6` being 28 here and 10 there, `O_CREAT` being
 `0x0200` and `0x0040` — is all still ahead, and lands at M3. Do not read a
 green M0 as evidence the seam will be easy.
+
+### Which tiers are actually built
+
+`CONVENTIONS.md` section 8 says which tiers the project **requires** and why.
+This table says which of them **exist**, and `tools/bstier.pl` checks it
+against `tests/run.sh` rather than anyone typing it.
+
+The hazard is larger here than it was in the sibling, which is why the tool
+arrived before the tiers did: brainstem declares eighteen tiers and has built
+four. A table that describes what you want and what you have in one column
+drifts the moment those differ, and here they differ almost everywhere.
+
+`run.sh lines` counts SOURCE lines, not checks: a loop is one line. `manual`
+means a practice rather than an automated check, and such a tier must have no
+marker in the suite at all.
+
+| tier | built | run.sh lines | what it is |
+|---|---|---|---|
+| 0 | yes | 3 | checker self-tests |
+| 1 | yes | 17 | interpreter self-test, all three EOF modes |
+| 2 | no | 0 | the program is still brainfuck — needs bsbf and fixtures |
+| 3 | no | 0 | fixture regeneration — needs bfgen |
+| 3a | no | 0 | fixture legibility |
+| 3b | no | 0 | the header does not lie |
+| 4 | yes | 6 | the frame codec in isolation, two implementations |
+| 5 | no | 0 | per-op round trip — needs the broker |
+| 6 | no | 0 | error paths |
+| 7 | no | 0 | determinism and replay |
+| 8 | no | 0 | interpreter semantics matrix |
+| 9 | no | 0 | deadlock and timeout |
+| 10 | no | 0 | platform parity |
+| 10a | no | 0 | per-op syscall surface |
+| 10b | no | 0 | the seam is narrow |
+| 10c | yes | 6 | the tables and the lane definitions agree |
+| 11 | manual | 0 | mutation, a discipline rather than a check |
+| 12 | no | 0 | purity audit, M8 |
 
 ## Why this project exists, since the name is not obvious
 

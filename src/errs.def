@@ -1,0 +1,82 @@
+/* errs.def — THE status table. One line per code, included wherever the set
+ * is needed.
+ *
+ * X(value, name, text)
+ *
+ * Included three times: once to build the enum, once to build the name table
+ * for diagnostics, and once by --dump-abi so tools/bsabi can diff it against
+ * ABI.md. Nothing else includes it, and nothing anywhere else may define a
+ * status code -- a second list is how a code comes to mean two things.
+ *
+ * THESE ARE NOT ERRNO AND MUST NEVER BE. errno 11 is EAGAIN on Linux and
+ * EDEADLK on FreeBSD; errno 35 is the reverse. A brainfuck program branching
+ * on the raw number would retry on one platform and abort on the other from
+ * the same byte, and the platform parity tier could never pass. The mapping
+ * from errno lives at the seam and dies there.
+ *
+ * The order is not arbitrary. Testing "status == N" costs N decrements in
+ * brainfuck, so the codes a program tests most often are the cheapest ones to
+ * test. OK is nought because a cleared cell already holds it.
+ */
+
+/* success and the two a program branches on constantly */
+X(0x00, OK,          "ok")
+X(0x01, END,         "end of stream or directory")
+X(0x02, AGAIN,       "would block")
+
+/* the common refusals */
+X(0x03, BADF,        "no such handle, stale handle, or wrong kind")
+X(0x04, DENIED,      "refused by capability policy or by the host")
+X(0x05, NOENT,       "no such file or directory")
+X(0x06, INVAL,       "malformed value, bad flag bit, or wrong length")
+X(0x07, PIPE,        "peer is gone")
+X(0x08, EXIST,       "already exists")
+X(0x09, NOTDIR,      "expected a directory")
+X(0x0A, ISDIR,       "expected a non-directory")
+X(0x0B, NOTEMPTY,    "directory not empty")
+X(0x0C, INTR,        "interrupted, retry")
+X(0x0D, SPIPE,       "not seekable")
+X(0x0E, LOOP,        "too many symbolic links")
+X(0x0F, NAMETOOLONG, "name too long")
+X(0x10, NOSPC,       "out of space or quota")
+X(0x11, EXHAUSTED,   "out of handles, memory, or processes")
+X(0x12, XDEV,        "cross-device operation")
+X(0x13, ROFS,        "read-only filesystem")
+X(0x14, OVERFLOW,    "value or result does not fit")
+X(0x15, TIMEDOUT,    "timed out")
+X(0x16, BUSY,        "resource busy")
+X(0x17, NOTSUP,      "operation, family or protocol not supported")
+X(0x18, NOSYS,       "this platform or build cannot provide this op")
+X(0x19, NOSUCHOP,    "this broker does not implement this opcode")
+X(0x1A, IO,          "I/O error, or an errno with no mapping")
+
+/* net */
+X(0x20, CONNREFUSED,  "connection refused")
+X(0x21, CONNRESET,    "connection reset or aborted")
+X(0x22, ADDRINUSE,    "address in use")
+X(0x23, ADDRNOTAVAIL, "address not available")
+X(0x24, NETUNREACH,   "network or host unreachable")
+X(0x25, NOTCONN,      "not connected")
+X(0x26, ISCONN,       "already connected")
+X(0x27, MSGSIZE,      "message too long")
+
+/* process */
+X(0x30, NOCHILD,     "no such child")
+X(0x31, NOEXEC,      "not executable, or argv and env too large")
+
+/* Fatal protocol errors. After sending one of these the broker writes nothing
+ * further and exits 70. They are in the 0xE0 range so a program can test the
+ * high bits alone to know the conversation is over, without a table. */
+X(0xE0, PROTO,       "malformed frame, bad opcode, or unrecoverable desync")
+X(0xE2, BADLEN,      "payload length is wrong for this opcode")
+X(0xE3, VERSION,     "hello major version mismatch")
+X(0xE4, NOHELLO,     "an op arrived before a successful hello")
+X(0xE5, REHELLO,     "a second hello")
+X(0xE6, TOOBIG,      "frame exceeds the maximum payload")
+X(0xE7, SHUTDOWN,    "the broker is shutting down")
+
+/* 0x7F and 0xFF are RESERVED and never transmitted. They are the sentinels a
+ * program seeds its status cell with to detect that no broker is there at
+ * all: an interpreter that leaves the cell unchanged at end of input shows
+ * 0x7F, and one that stores 255 shows 0xFF. Neither is a status, so either is
+ * unambiguous. See ABI.md section 3.2. */

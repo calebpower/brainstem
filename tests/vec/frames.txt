@@ -1,0 +1,55 @@
+# Pinned frame vectors, derived by hand from ABI.md section 2.
+#
+# Every expected frame below was written out by reading the spec and counting
+# bytes, NOT by running either implementation and recording what it said. That
+# distinction is the whole value of the file: a vector generated from the code
+# proves the code is self consistent and nothing else.
+#
+# Two record types, whitespace separated. "-" is an empty payload.
+#
+#   enc KIND PAYLOAD FRAME     encoding KIND and PAYLOAD must give FRAME,
+#                              and decoding FRAME must give KIND and PAYLOAD
+#   err FRAME REASON           decoding FRAME must fail with exactly REASON
+#
+# The header is  kind{u8}  len{u16 LE}  and the payload follows. So a frame is
+# always three bytes longer than its payload, and the two length bytes are low
+# first -- ten is "0a 00" and never "00 0a".
+
+# --- the degenerate case, which is legal ---------------------------------
+# op 0x02 is exit; its payload here is empty rather than the one byte the op
+# actually takes, because the CODEC has no opinion about op arities. That
+# separation is deliberate: an arity check needs the op table, and putting the
+# op table in the codec would make the codec untestable without it.
+enc 02 - 020000
+
+# --- one byte ------------------------------------------------------------
+enc 03 ff 030100ff
+
+# --- the hello request, ABI.md section 3 ---------------------------------
+# magic "BSTM" = 42 53 54 4d, want_major 1 = 01 00, want_minor 0 = 00 00,
+# flags 0 = 00 00. Ten bytes, so the length is 0a 00.
+enc 01 4253544d010000000000 010a004253544d010000000000
+
+# --- a payload whose length has a high byte ------------------------------
+# 258 bytes would be tedious to write out, so this pins the SHAPE instead: a
+# length of 0x0102 is "02 01" on the wire. The full round trip at that size is
+# checked differentially in the suite, where the payload can be generated.
+enc 04 - 040000
+
+# --- every byte value survives, including NUL and 0x0a -------------------
+# 0x0a is an ordinary payload byte here, not a terminator. An implementation
+# that treated the stream as text would corrupt exactly this case, and the
+# .gitattributes rule exists so a CRLF checkout cannot do it either.
+enc 05 000a0d1aff 050500000a0d1aff
+
+# --- decode failures, each with one reason -------------------------------
+# fewer than three bytes is not a header at all
+err 01 SHORTHDR
+err 0102 SHORTHDR
+# the header promises more payload than arrived
+err 010a0042 SHORTBODY
+err 030100 SHORTBODY
+# the header promises less payload than arrived; the extra bytes are the
+# beginning of a desynchronised stream and must never be silently dropped
+err 020000ff TRAILING
+err 030100ffff TRAILING

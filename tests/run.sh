@@ -33,6 +33,16 @@ sh tools/build.sh >/dev/null
 bfi=$repo/build/bfi
 echo "built"
 
+# TIER 0
+echo
+echo "== tier 0: checker self-tests =="
+# Before any real file is examined, per CONVENTIONS section 8. A checker that
+# has never been observed failing is indistinguishable from a clean corpus.
+run "bscodec self-test" ./build/bscodec --selftest
+run "bsframe self-test" ./build/bsframe --selftest
+run "bstier self-test" perl tools/bstier.pl --selftest
+
+# TIER 10c
 echo
 echo "== tier 10c: one definition of everything =="
 
@@ -79,6 +89,12 @@ run "every platform guest-setup declares has a branch" sh -c '
     done
     exit $rc'
 
+# CONVENTIONS section 8 says which tiers are REQUIRED; HANDOFF says which are
+# BUILT. Keeping those in one column is what let the sibling project claim
+# fuzz coverage it did not have, so here they are two tables and a tool reads
+# both against the suite.
+run "HANDOFF's tier table describes the suite" perl tools/bstier.pl
+
 # The vendored interpreter carries one intentional delta from upstream and the
 # whole project rests on it. Someone tidying the vendored file back toward its
 # source would reintroduce a deadlock whose only symptom is a hang, so the
@@ -86,6 +102,7 @@ run "every platform guest-setup declares has a branch" sh -c '
 run "the vendored interpreter still has the unbuffering fix" \
     grep -q "setvbuf(stdout, NULL, _IONBF, 0)" tools/bfi.c
 
+# TIER 1
 echo
 echo "== tier 1: interpreter self-test =="
 tmp=$(mktemp -d)
@@ -178,6 +195,71 @@ run "BFI_FLUSH=block round trips (the bytes still arrive, just late)" sh -c "
     | BFI_FLUSH=block \"$bfi\" \"$tmp/echo3.bf\" | \"$repo/build/hx\" | grep -qx 00ff41"
 run "an unknown BFI_FLUSH is refused rather than guessed" sh -c "
     BFI_FLUSH=wat \"$bfi\" \"$tmp/echo3.bf\" </dev/null >/dev/null 2>&1; test \$? -eq 2"
+
+# TIER 4
+echo
+echo "== tier 4: the frame codec, in isolation =="
+# No process, no descriptor, no kernel. A failure here cannot be a pipe
+# problem, which is the entire reason this tier runs before anything that
+# opens one.
+#
+# Every case is driven through BOTH implementations: build/bscodec, which is
+# a skin over src/frame.c, and build/bsframe, which was written from ABI.md
+# with no shared code. The pinned frames in tests/vec/frames.txt were derived
+# by hand from the specification. So each assertion has two oracles behind it
+# -- the document, and a second reading of the document -- and a byte order
+# bug would have to be made twice, in two directions, to survive.
+while read -r _v_type _v_a _v_b _v_c; do
+    case "$_v_type" in
+        ''|'#'*) continue ;;
+    esac
+    if [ "$_v_type" = enc ]; then
+        _v_pay=$_v_b
+        [ "$_v_pay" = "-" ] && _v_pay=""
+        _v_len=$(( ${#_v_pay} / 2 ))
+        for _v_impl in bscodec bsframe; do
+            run "$_v_impl encodes op $_v_a len $_v_len" sh -c "
+                test \"\$(./build/$_v_impl encode '$_v_a' '$_v_pay')\" = '$_v_c'"
+            run "$_v_impl decodes op $_v_a len $_v_len" sh -c "
+                test \"\$(./build/$_v_impl decode '$_v_c')\" = 'kind=$_v_a len=$_v_len payload=$_v_pay'"
+        done
+    elif [ "$_v_type" = err ]; then
+        for _v_impl in bscodec bsframe; do
+            run "$_v_impl refuses $_v_a with $_v_b" sh -c "
+                test \"\$(./build/$_v_impl decode '$_v_a')\" = 'ERR $_v_b'"
+        done
+    fi
+done < tests/vec/frames.txt
+
+# The cases that are too long to write out by hand, checked differentially:
+# the two implementations must agree, and the header must carry the length
+# little end first. 256 is the byte boundary, where a big endian
+# implementation would put 01 00 and a little endian one 00 01.
+run "the length crosses the byte boundary little end first" sh -c '
+    pay=$(awk "BEGIN{ for (i=0;i<256;i++) printf \"41\" }")
+    a=$(./build/bscodec encode 06 "$pay")
+    b=$(./build/bsframe encode 06 "$pay")
+    test "$a" = "$b" || { echo "the two implementations disagree"; exit 1; }
+    # header is 06 then 00 01 for 256, not 01 00
+    test "$(printf %s "$a" | cut -c1-6)" = "060001"'
+
+run "a maximum length payload round trips through both" sh -c '
+    pay=$(awk "BEGIN{ for (i=0;i<65535;i++) printf \"5a\" }")
+    a=$(./build/bscodec encode 07 "$pay")
+    b=$(./build/bsframe encode 07 "$pay")
+    test "$a" = "$b" || { echo "the two implementations disagree at the maximum"; exit 1; }
+    test "$(printf %s "$a" | cut -c1-6)" = "07ffff"
+    # printf %s emits no trailing newline, so this is exactly the hex length
+    test "$(printf %s "$a" | wc -c)" = "$(( (3 + 65535) * 2 ))"'
+
+run "the two implementations agree on every single byte value" sh -c '
+    rc=0
+    for v in 00 01 0a 0d 1a 20 7f 80 ff; do
+        a=$(./build/bscodec encode 08 "$v")
+        b=$(./build/bsframe encode 08 "$v")
+        [ "$a" = "$b" ] || { echo "disagree on $v: $a vs $b"; rc=1; }
+    done
+    exit $rc'
 
 echo
 echo "== summary =="
