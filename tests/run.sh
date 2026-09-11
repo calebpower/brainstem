@@ -251,8 +251,13 @@ run "a maximum length payload round trips through both" sh -c '
     b=$(./build/bsframe encode 07 "$pay")
     test "$a" = "$b" || { echo "the two implementations disagree at the maximum"; exit 1; }
     test "$(printf %s "$a" | cut -c1-6)" = "07ffff"
-    # printf %s emits no trailing newline, so this is exactly the hex length
-    test "$(printf %s "$a" | wc -c)" = "$(( (3 + 65535) * 2 ))"'
+    # The length comes from the shell rather than from wc, and that is not a
+    # style choice. BSD wc right aligns its output with leading spaces --
+    # "  131076" -- while GNU coreutils does not, and command substitution
+    # strips trailing newlines but NOT leading spaces. So the obvious
+    # spelling of this check passes on Linux and fails on FreeBSD, which is
+    # exactly what it did. ${#a} has no such opinion.
+    test "${#a}" = "$(( (3 + 65535) * 2 ))"'
 
 run "the two implementations agree on every single byte value" sh -c '
     rc=0
