@@ -59,7 +59,7 @@ green M0 as evidence the seam will be easy.
 ### Which tiers are actually built
 
 `CONVENTIONS.md` section 8 says which tiers the project **requires** and why.
-This table says which of them **exist**, and `tools/bstier.pl` checks it
+This table says which of them **exist**, and `tools/bstier.sh` checks it
 against `tests/run.sh` rather than anyone typing it.
 
 The hazard is larger here than it was in the sibling, which is why the tool

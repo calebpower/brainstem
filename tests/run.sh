@@ -40,7 +40,7 @@ echo "== tier 0: checker self-tests =="
 # has never been observed failing is indistinguishable from a clean corpus.
 run "bscodec self-test" ./build/bscodec --selftest
 run "bsframe self-test" ./build/bsframe --selftest
-run "bstier self-test" perl tools/bstier.pl --selftest
+run "bstier self-test" sh tools/bstier.sh --selftest
 run "bsbf self-test" ./build/bsbf --selftest
 run "brainstem self-test" ./build/brainstem --selftest
 
@@ -95,7 +95,7 @@ run "every platform guest-setup declares has a branch" sh -c '
 # BUILT. Keeping those in one column is what let the sibling project claim
 # fuzz coverage it did not have, so here they are two tables and a tool reads
 # both against the suite.
-run "HANDOFF's tier table describes the suite" perl tools/bstier.pl
+run "HANDOFF's tier table describes the suite" sh tools/bstier.sh
 
 # The vendored interpreter carries one intentional delta from upstream and the
 # whole project rests on it. Someone tidying the vendored file back toward its

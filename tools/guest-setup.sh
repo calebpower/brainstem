@@ -61,7 +61,12 @@ if [ "$do_toolchain" = yes ]; then
             # future image drops one, instead of letting it surface as a
             # compile error in the build phase.
             echo "guest-setup: FreeBSD -- toolchain is in base, verifying"
-            for _gs_t in cc ktrace kdump; do
+            # awk is in base on both platforms and the suite leans on it --
+            # tools/bfgen.sh and tools/bstier.sh are both awk, deliberately,
+            # after perl turned out to be absent here. Verified rather than
+            # assumed, because "it is in base" is exactly what was said about
+            # perl once.
+            for _gs_t in cc ktrace kdump awk; do
                 command -v "$_gs_t" >/dev/null 2>&1 || {
                     echo "guest-setup: $_gs_t is missing from base" >&2
                     echo "guest-setup: this is not the guest brainstem targets" >&2
@@ -78,6 +83,10 @@ if [ "$do_toolchain" = yes ]; then
             DEBIAN_FRONTEND=noninteractive; export DEBIAN_FRONTEND
             apt-get update -qq
             apt-get install -y -qq build-essential strace >/dev/null
+            # awk comes with the base image via mawk; verified for the same
+            # reason as on FreeBSD
+            command -v awk >/dev/null 2>&1 || {
+                echo "guest-setup: awk is missing" >&2; exit 1; }
             ;;
         *)
             echo "guest-setup: unsupported platform '$(uname -s)'" >&2
