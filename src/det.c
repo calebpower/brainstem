@@ -29,6 +29,10 @@ static int    clock_mode = BS_CLOCK_LIVE;
 static bs_i64 clock_epoch = 1700000000;
 static bs_u32 clock_step  = 1000000;      /* one millisecond per request */
 static bs_u64 ticks;
+static int    sort_readdir;
+
+void det_set_sort_readdir(void) { sort_readdir = 1; }
+int  det_sort_readdir(void)     { return sort_readdir; }
 
 /* ---- ChaCha20, RFC 8439 section 2.3 ------------------------------------ */
 

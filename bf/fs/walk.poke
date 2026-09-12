@@ -1,0 +1,52 @@
+# walk.poke -- enumerate a directory of four entries, in a fixed order.
+#
+# THE FIXTURE --sort-readdir EXISTS FOR. A directory has no order: ext4
+# returns entries in hash order, ufs in roughly creation order, and neither
+# is a property of the program. Every other fixture in this tree walks a
+# directory with exactly one entry in it, which is the only size at which
+# "whatever order the filesystem likes" and "a fixed order" are the same
+# thing -- so until now no trace here could pin a walk.
+#
+# The suite creates a, b, c and d in an order that is not alphabetical, runs
+# this under --sort-readdir, and compares the result against a pinned trace.
+# That trace IS the check: a filesystem returning creation order, or a broker
+# where the flag did nothing, produces different bytes and the tier goes red.
+#
+# c is a DIRECTORY and the other three are files, so the type byte is
+# exercised as well as the name -- an enumeration that got the order right
+# and the kinds wrong would otherwise pass.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.17 and 7.20.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 107
+#   open  op 11, dir ffffffff, flags READ|DIRECTORY = 0x0041, mode 0, path
+#   ".".  Handle 4: 1, 2 and 3 are always the broker's stdio.
+EMIT 11 09 00 ff ff ff ff 41 00 00 00 2e
+READ 7
+#   readdir  op 14, handle 4, flags 0.  One entry per call, and the reply is
+#   type{1} namelen{1} reserved{2} name -- so a one character name is five
+#   payload bytes and eight in all.  This is "a", type 1 regular.
+EMIT 14 06 00 04 00 00 00 00 00
+READ 8
+#   readdir again: "b", type 1 regular
+EMIT 14 06 00 04 00 00 00 00 00
+READ 8
+#   readdir again: "c", type 2 DIRECTORY.  The order is by name and the kind
+#   comes along with it.
+EMIT 14 06 00 04 00 00 00 00 00
+READ 8
+#   readdir again: "d", type 1 regular
+EMIT 14 06 00 04 00 00 00 00 00
+READ 8
+#   readdir once more: the directory is exhausted, so the reply is END 01
+#   with a zero length and nothing to parse
+EMIT 14 06 00 04 00 00 00 00 00
+READ 3
+#   close  op 0c, handle 4, which closes the walk with it
+EMIT 0c 04 00 04 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

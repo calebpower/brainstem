@@ -485,6 +485,37 @@ run "readdir yields one entry then ends" sh -c '
     printf "%s\n" "$out" | grep -q "< 00 len=7 02030000737562" || { echo "the sub entry is wrong"; exit 1; }
     printf "%s\n" "$out" | grep -q "^brainstem: < 01 len=0$"  || { echo "the walk did not end"; exit 1; }
     exit 0'
+# THE DIRECTORY WALK, which is the reason --sort-readdir exists.
+#
+# A directory has no order. ext4 returns entries in hash order, ufs in
+# roughly creation order, and neither is a property of the program -- so
+# until now every fixture here walked a directory with exactly ONE entry in
+# it, the only size at which "whatever order the filesystem likes" and "a
+# fixed order" are the same thing.
+#
+# The entries are created d, b, c, a, which is deliberate: on a filesystem
+# that enumerates in creation order -- which is the PRIMARY platform -- an
+# unsorted walk returns them in that order and every check below goes red.
+# BS_WALK is a command rather than a shell function ON PURPOSE: every check
+# below runs under `sh -c`, which is a child shell, and a child shell does not
+# inherit functions. Exporting them is a bashism. So the setup and the run are
+# each one line of text, expanded inside the child.
+BS_MKWALK='rm -rf "$BS_TMP/walk" && mkdir -p "$BS_TMP/walk" &&
+    cd "$BS_TMP/walk" && : > d && : > b && mkdir c && : > a'
+BS_WALK='"$BS_R/build/brainstem" --sort-readdir --trace \
+    -- "$BS_R/build/bfi" "$BS_R/bf/fs/walk.bf" </dev/null 2>&1 >/dev/null'
+export BS_MKWALK BS_WALK
+
+run "a sorted directory walk yields every entry, with its kind" sh -c '
+    eval "$BS_MKWALK"
+    got=$(eval "$BS_WALK" | sed -n "s/^brainstem: < 00 len=5 \(..\)..0000\(..\)$/\1\2/p" \
+          | tr "\n" " ")
+    test "$got" = "0161 0162 0263 0164 " || { echo "got [$got]"; exit 1; }
+    exit 0'
+run "and then it ends, rather than repeating the last entry" sh -c '
+    eval "$BS_MKWALK"
+    eval "$BS_WALK" | grep -q "^brainstem: < 01 len=0$"'
+
 # The three handles every program starts with, named in the hello table so a
 # program can check rather than assume. The hex is "stdin" "stdout" "stderr"
 # with their length bytes, which is the tail of the record.
@@ -860,6 +891,41 @@ run "roundtrip.bf matches the pinned trace" sh -c '
     (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/fs.roundtrip.txt "$BS_TMP/obs"'
+run "walk.bf under --sort-readdir matches the pinned trace" sh -c '
+    eval "$BS_MKWALK"
+    eval "$BS_WALK" | sed "$BS_NORM" > "$BS_TMP/obs"
+    diff -u "$BS_R/tests/trace/fs.walk.txt" "$BS_TMP/obs"'
+# THE PIN ABOVE IS THE CHECK THAT --sort-readdir WORKS, and this is the check
+# that the pin is reading the walk rather than the frames around it. Rename
+# one entry and the trace has to change; if it does not, the four readdir
+# replies are not being compared at all.
+run "and the walk pin sees the entries, not just the frames around them" sh -c '
+    eval "$BS_MKWALK"
+    eval "$BS_WALK" | sed "$BS_NORM" > "$BS_TMP/obs"
+    mv "$BS_TMP/walk/d" "$BS_TMP/walk/e"
+    (cd "$BS_TMP/walk" && eval "$BS_WALK") | sed "$BS_NORM" > "$BS_TMP/obs2"
+    if cmp -s "$BS_TMP/obs" "$BS_TMP/obs2"; then
+        echo "renaming an entry did not change the trace"
+        exit 1
+    fi
+    exit 0'
+# SORTEDNESS ITSELF, checked against no pin at all. The entries are created
+# d, b, c, a, so a filesystem enumerating in creation order -- which is the
+# PRIMARY platform -- fails this the moment the flag stops working.
+#
+# What it cannot rule out is a filesystem that already returns names in byte
+# order, where an inert flag would pass. That is why the flag is ALSO pinned
+# above: between the two, an inert flag has nowhere left to hide except a
+# host where both checks are vacuous for the same reason.
+run "--sort-readdir returns names in byte order, whatever order they were made in" sh -c '
+    eval "$BS_MKWALK"
+    got=$(eval "$BS_WALK" | sed -n "s/^brainstem: < 00 len=5 ....0000\(..\)$/\1/p")
+    test -n "$got" || { echo "no entries came back at all"; exit 1; }
+    want=$(printf "%s\n" "$got" | sort)
+    test "$got" = "$want" || { echo "got [$got] wanted [$want]"; exit 1; }
+    test "$(printf "%s\n" "$got" | wc -l)" = "$(printf "%s\n" "$got" | sort -u | wc -l)" \
+        || { echo "an entry came back twice"; exit 1; }
+    exit 0'
 run "refused.bf matches the pinned trace" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
     (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/refused.bf" </dev/null) 2>&1 >/dev/null \

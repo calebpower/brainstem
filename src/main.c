@@ -13,6 +13,7 @@
  *   --op-timeout MS        default 30000; 0 disables
  *   --seed HEX             32 hex characters; makes random_bytes deterministic
  *   --clock SPEC           live | frozen[=EPOCH] | virtual[=EPOCH][,step=NS]
+ *   --sort-readdir         enumerate a directory in byte order of its names
  *   --trace                print every frame to stderr
  *   --check-interpreter P  probe P for the one property the protocol needs
  *   --dump-abi             print the op table, for tools/bsabi
@@ -308,6 +309,7 @@ int main(int argc, char **argv) {
             return check_interpreter(argv[i + 1]);
         }
         if (strcmp(a, "--trace") == 0) { o.trace = 1; continue; }
+        if (strcmp(a, "--sort-readdir") == 0) { det_set_sort_readdir(); continue; }
         if (strcmp(a, "--seed") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return BS_EXIT_USAGE; }
             if (det_set_seed(argv[++i]) != BS_OK) {

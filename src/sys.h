@@ -350,6 +350,13 @@ bs_err sys_mkdir (bs_osfd dir, const char *path, bs_u32 mode);
 bs_err sys_unlink(bs_osfd dir, const char *path, int removedir);
 bs_err sys_rename(bs_osfd olddir, const char *oldpath, bs_osfd newdir, const char *newpath);
 
+/* The longest directory entry name, and the size of the one buffer a name is
+ * ever read into. 256 is NAME_MAX + 1 on both platforms; a longer name is
+ * NAMETOOLONG, which is a status the program can act on rather than a
+ * truncation it cannot detect. Bounded here rather than in the op because the
+ * seam is what does the reading. */
+#define BS_NAME_MAX 256
+
 /* Directory enumeration. sys_dir_open takes ownership of nothing: the caller
  * still owns fd and must not close it while the bs_osdir is live.
  *

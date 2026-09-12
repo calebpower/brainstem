@@ -27,6 +27,18 @@ bs_err det_set_seed(const char *hex);
 /* --clock live | frozen[=EPOCH] | virtual[=EPOCH][,step=NS] */
 bs_err det_set_clock(const char *spec);
 
+/* --sort-readdir. The third source of nondeterminism, and the one that is
+ * not a clock or a generator: a directory's ORDER is whatever the filesystem
+ * feels like. ext4 hashes, ufs returns creation order, and neither is a
+ * property of the program -- so a trace containing a directory walk cannot be
+ * pinned on two platforms without this, which is exactly what it is for.
+ *
+ * It lives here rather than at the seam for the same reason the clock does:
+ * the branch is a determinism policy, and sys_dir_next stays a pure platform
+ * call that knows nothing about any of this. */
+void det_set_sort_readdir(void);
+int  det_sort_readdir(void);
+
 int    det_rng_seeded(void);
 int    det_clock_mode(void);
 bs_u32 det_clock_step(void);

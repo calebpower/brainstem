@@ -269,12 +269,12 @@ marker in the suite at all.
 | 3a | yes | 3 | fixture legibility, and the expander knows no ABI |
 | 3b | yes | 1 | the header does not lie: tools/bspoke.sh, six rules |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | yes | 21 | per-op round trip |
+| 5 | yes | 23 | per-op round trip |
 | 6 | yes | 17 | error paths |
 | 7 | yes | 12 | determinism: seed, frozen and virtual clock, both polarities |
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
-| 10 | yes | 10 | platform parity, against traces pinned in tests/trace/ |
+| 10 | yes | 13 | platform parity, against traces pinned in tests/trace/ |
 | 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 10 | the tables and the lane definitions agree |

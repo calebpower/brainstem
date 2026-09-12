@@ -84,6 +84,10 @@ struct bs_slot {
     bs_u16   rights;
     bs_osfd  fd;
     bs_osdir dir;          /* non-null only while a readdir walk is open */
+    /* --sort-readdir: the name this walk returned last, which is the cursor
+     * the next selection starts after. Empty means "before the first name".
+     * Unused, and unread, when the flag is off. */
+    char     sortcur[BS_NAME_MAX];
     const char *name;      /* the name reported in the hello table, or null */
     bs_u8    namelen;
     /* Appears in the hello reply's handle table. True for the three standard

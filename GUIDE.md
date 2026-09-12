@@ -117,7 +117,7 @@ row marked for a later milestone is one that is still refused.
 | `--check-interpreter PATH` | now | probe an interpreter for the one property §2.3 needs |
 | `--dump-abi` | now | print the op table, one row per line |
 | `--selftest` | now | the broker's own checks |
-| `--sort-readdir` | M7 | normalise directory order |
+| `--sort-readdir` | now | enumerate a directory in byte order of its names |
 | `--replay FILE` | M7 | re-run against a recorded trace, with no syscalls at all |
 
 **There are no flags for reaching things, and that is the design.** Your
@@ -150,8 +150,8 @@ Your first `open`, `socket` or `pipe` therefore comes back as handle 4.
 
 ### Making a run repeatable
 
-Two things in this ABI can differ between two runs of the same program, and
-both have a knob:
+Three things in this ABI can differ between two runs of the same program, and
+each has a knob:
 
 ```sh
 brainstem --seed 000102030405060708090a0b0c0d0e0f \
@@ -170,6 +170,21 @@ never moves.
 
 The seed is echoed back in the hello reply, all sixteen bytes, so a program can
 see which world it is in without being told out of band.
+
+The third is the one people forget: **a directory has no order.** `readdir`
+gives you whatever the filesystem feels like — ext4 hashes the names, ufs
+returns roughly creation order — so a program that walks a directory does
+something different on two machines through no fault of its own. `--sort-readdir`
+makes the order byte order on the name, and nothing else changes:
+
+```sh
+brainstem --sort-readdir --trace -- ./build/bfi walk.bf
+```
+
+It costs a full rescan of the directory per entry, because the broker
+allocates nothing and so holds one name rather than all of them. For the
+directory sizes a brainfuck program will walk that is not a cost you can
+measure; if it ever is, do not turn it on.
 
 ---
 

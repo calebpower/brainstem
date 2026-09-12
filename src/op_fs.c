@@ -20,6 +20,7 @@
 #include "ops.h"
 #include "fdtab.h"
 #include "path.h"
+#include "det.h"
 
 static bs_err want(bs_u32 h, bs_u16 rights, struct bs_slot **out) {
     struct bs_slot *s = bs_fdtab_get(h);
@@ -257,8 +258,84 @@ bs_err op_fs_stat(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
  * interpreter spending 10^6 to 10^9 instructions between calls. The round
  * trip is free at this timescale. There is no trade-off here, only an
  * apparent one. */
+/* --sort-readdir, and the whole of it.
+ *
+ * A DIRECTORY HAS NO ORDER. ext4 returns entries in hash order, ufs in
+ * roughly creation order, and neither is a property of the program, so a
+ * trace containing a directory walk is not something a parity tier can pin.
+ * This flag makes the order a function of the names alone, which is what
+ * lets bf/fs/walk.poke have a pinned trace at all.
+ *
+ * SELECTION, NOT SORTING, because sorting means holding the whole directory
+ * and there is no allocation on the ABI path (CONVENTIONS section 5). Each
+ * call rewinds, scans, and returns the least name strictly greater than the
+ * one it returned last. The cursor is one name on the slot rather than an
+ * array of them, so a directory of any size costs 256 bytes.
+ *
+ * What that costs is a full scan per entry -- and a stat per entry per scan,
+ * since sys_dir_next types every entry it returns -- so a walk of n entries
+ * is O(n^2) syscalls instead of O(n). That is the right trade here and the
+ * reasoning is the same one that made readdir return one entry per call: the
+ * consumer is a brainfuck interpreter spending 10^6 to 10^9 instructions
+ * between calls, the directories a fixture walks have single digit entry
+ * counts, and the flag is off unless somebody asks for it. An implementation
+ * that allocated would have been faster and would have cost the project a
+ * rule it checks mechanically.
+ *
+ * ENTRIES ADDED DURING A WALK: one sorting after the cursor is seen, one
+ * sorting before it is not. That is a weaker promise than a snapshot and a
+ * stronger one than the unsorted path makes, where a rewind can produce
+ * anything at all.
+ */
+
+/* Byte order, not strcoll: a locale-dependent order is precisely the kind of
+ * thing that would make the two platforms disagree, which is the one outcome
+ * this flag exists to prevent. Compared as unsigned char because plain char
+ * is signed on x86 and unsigned on arm, and a name with a high byte in it
+ * has to sort the same way on both. */
+static int namecmp(const char *a, const char *b) {
+    const unsigned char *x = (const unsigned char *)a;
+    const unsigned char *y = (const unsigned char *)b;
+    while (*x && *x == *y) { x++; y++; }
+    return (int)*x - (int)*y;
+}
+
+static bs_err next_sorted(struct bs_slot *d, bs_u8 *type, char *name,
+                          size_t cap, size_t *namelen, int *end) {
+    char best[BS_NAME_MAX], cand[BS_NAME_MAX];
+    bs_u8 besttype = BS_FT_UNKNOWN, candtype;
+    size_t bestlen = 0, candlen;
+    int have = 0, done;
+    bs_err e;
+
+    *end = 0;
+    e = sys_dir_rewind(d->dir);
+    if (e != BS_OK) return e;
+
+    for (;;) {
+        e = sys_dir_next(d->dir, d->fd, &candtype, cand, sizeof cand, &candlen, &done);
+        if (e != BS_OK) return e;
+        if (done) break;
+        if (d->sortcur[0] && namecmp(cand, d->sortcur) <= 0) continue;
+        if (have && namecmp(cand, best) >= 0) continue;
+        memcpy(best, cand, candlen + 1);
+        bestlen  = candlen;
+        besttype = candtype;
+        have     = 1;
+    }
+
+    if (!have) { *end = 1; return BS_OK; }
+    if (bestlen >= cap) return BS_NAMETOOLONG;
+
+    memcpy(d->sortcur, best, bestlen + 1);
+    memcpy(name, best, bestlen + 1);
+    *namelen = bestlen;
+    *type    = besttype;
+    return BS_OK;
+}
+
 bs_err op_fs_readdir(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
-    char name[256];
+    char name[BS_NAME_MAX];
     bs_u32 dh;
     unsigned int flags;
     struct bs_slot *d;
@@ -281,12 +358,19 @@ bs_err op_fs_readdir(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep)
     if (!d->dir) {
         e = sys_dir_open(d->fd, &d->dir);
         if (e != BS_OK) return e;
+        d->sortcur[0] = '\0';
     } else if (flags & 1u) {
         e = sys_dir_rewind(d->dir);
         if (e != BS_OK) return e;
+        d->sortcur[0] = '\0';
     }
 
-    e = sys_dir_next(d->dir, d->fd, &type, name, sizeof name, &namelen, &end);
+    /* The flag chooses which enumeration this is, and nothing below here
+     * knows which one it got. */
+    if (det_sort_readdir())
+        e = next_sorted(d, &type, name, sizeof name, &namelen, &end);
+    else
+        e = sys_dir_next(d->dir, d->fd, &type, name, sizeof name, &namelen, &end);
     if (e != BS_OK) return e;
 
     /* END is an empty reply rather than a status, because the program is
