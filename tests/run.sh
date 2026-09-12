@@ -40,6 +40,29 @@ BS_TMP=$(mktemp -d)
 # /dev/null makes every check independent of whoever ran it.
 BS_R=$repo
 export BS_TMP BS_R
+
+# Two masks, and both are named here rather than left for somebody to reverse
+# engineer out of a regex.
+#
+# The hello reply is found by its MAGIC rather than by its length, because its
+# length now depends on how many preopens the run was given. The first version
+# matched len=48 and would have silently stopped matching anything at all the
+# moment a fixture took a preopen -- a mask that matches nothing does not
+# fail, it stops asking, which is the failure mode this whole tier fears.
+#
+# The THIRD mask is the handle table: thirty six bytes describing what the
+# broker's own stdin, stdout and stderr actually are. Those kinds and rights
+# are a property of HOW THE BROKER WAS INVOKED, not of the program or the
+# protocol, so pinning them made every trace fail on a guest whose stdio was
+# wired up differently. The name tail after it is deterministic and stays
+# pinned, and the handles themselves are checked on their own below.
+#
+# The second mask is stat's mtime, twelve bytes of it. A file's modification
+# time is not a property of the program and cannot be pinned; everything else
+# in the 32 byte record is. stat is the only 32 byte reply the pinned fixtures
+# produce, and the vacuity check below is what keeps both masks honest.
+BS_NORM='s/^\(brainstem: < 00 len=[0-9]* 4253544d.\{32\}\)../\1%%/;s/^\(brainstem: < 00 len=32 .\{24\}\).\{24\}/\1MMMMMMMMMMMMMMMMMMMMMMMM/;s/^\(brainstem: < 00 len=[0-9]* 4253544d.\{88\}\).\{72\}/\1HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH/'
+export BS_NORM
 trap 'rm -rf "$BS_TMP"; rm -f "$bs_out"' EXIT
 
 # ON FAILURE, SAY WHAT THE CHECK SAID.
@@ -605,6 +628,95 @@ run "pipe yields a read end and a write end, in that order" sh -c '
     (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
         | grep -q "^brainstem: < 00 len=8 0400000005000000$"'
 
+# TIER 5a
+echo
+echo "== tier 5a: metamorphic, across ops and across knobs =="
+# Everything above asks whether one conversation produced the bytes it was
+# supposed to. These ask a different kind of question: change ONE thing and
+# require the rest to be unchanged.
+#
+# That catches a class the pinned traces cannot. A pin says "this run gives
+# these bytes"; it cannot say WHY, so a value that leaked from one field into
+# another -- a clock epoch reaching a length, a seed reaching a handle, a
+# directory name reaching a reply -- is pinned right along with everything
+# else and never looks wrong. These say what a knob is allowed to touch, and
+# the interesting half of each is the "and nothing else".
+#
+# The relations were MEASURED before they were written down. Every one of
+# them was run both ways first, and the "nothing else" in each is the diff
+# that actually came back, not the diff that ought to have.
+run "a frozen epoch changes the clock replies and nothing else" sh -c '
+    ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf \
+        </dev/null 2>"$BS_TMP/m1" >/dev/null
+    ./build/brainstem --trace --clock frozen=1800000000 -- ./build/bfi bf/time/clock.bf \
+        </dev/null 2>"$BS_TMP/m2" >/dev/null
+    got=$(diff "$BS_TMP/m1" "$BS_TMP/m2" | grep "^[<>]" | grep -cv "^[<>] brainstem: < 00 len=12 ")
+    test "$got" = 0 || { diff "$BS_TMP/m1" "$BS_TMP/m2"; exit 1; }
+    # and it must change SOMETHING, or the relation is satisfied by a knob
+    # that does nothing at all
+    cmp -s "$BS_TMP/m1" "$BS_TMP/m2" && { echo "two epochs gave one trace"; exit 1; }
+    exit 0'
+run "a seed changes its own echo and the random bytes, and nothing else" sh -c '
+    ./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi \
+        bf/rand/bytes.bf </dev/null 2>"$BS_TMP/m1" >/dev/null
+    ./build/brainstem --trace --seed 0f0e0d0c0b0a09080706050403020100 -- ./build/bfi \
+        bf/rand/bytes.bf </dev/null 2>"$BS_TMP/m2" >/dev/null
+    got=$(diff "$BS_TMP/m1" "$BS_TMP/m2" | grep "^[<>]" \
+          | grep -cv "^[<>] brainstem: < 00 len=\(104\|16\) ")
+    test "$got" = 0 || { diff "$BS_TMP/m1" "$BS_TMP/m2"; exit 1; }
+    cmp -s "$BS_TMP/m1" "$BS_TMP/m2" && { echo "two seeds gave one trace"; exit 1; }
+    exit 0'
+# THE ONE THE SORTED WALK EXISTS TO MAKE TRUE. Two directories with the same
+# four names, built in opposite orders, must produce the same conversation.
+run "a sorted walk does not depend on the order the entries were made in" sh -c '
+    rm -rf "$BS_TMP/walk" && mkdir -p "$BS_TMP/walk"
+    (cd "$BS_TMP/walk" && : > d && : > b && mkdir c && : > a)
+    eval "$BS_WALK" | sed "$BS_NORM" > "$BS_TMP/m1"
+    rm -rf "$BS_TMP/walk" && mkdir -p "$BS_TMP/walk"
+    (cd "$BS_TMP/walk" && : > a && mkdir c && : > b && : > d)
+    eval "$BS_WALK" | sed "$BS_NORM" > "$BS_TMP/m2"
+    diff -u "$BS_TMP/m1" "$BS_TMP/m2"'
+# And the flag must not change a walk that has nothing to sort. roundtrip
+# enumerates a directory of exactly one entry, where every order is the same
+# order, so the two traces have to agree byte for byte.
+run "--sort-readdir changes nothing when there is nothing to sort" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" \
+        "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null | sed "$BS_NORM" > "$BS_TMP/m1"
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace --sort-readdir -- "$BS_R/build/bfi" \
+        "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null | sed "$BS_NORM" > "$BS_TMP/m2"
+    diff -u "$BS_TMP/m1" "$BS_TMP/m2"'
+# Nothing about where the broker is standing may reach a reply. The name is
+# deliberately a different LENGTH as well as different content, because a
+# path leaking into a reply would most likely arrive as a length.
+run "the conversation does not depend on what the working directory is called" sh -c '
+    rm -rf "$BS_TMP/w" && mkdir -p "$BS_TMP/w"
+    (cd "$BS_TMP/w" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" \
+        "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null | sed "$BS_NORM" > "$BS_TMP/m1"
+    rm -rf "$BS_TMP/a-considerably-longer-directory-name"
+    mkdir -p "$BS_TMP/a-considerably-longer-directory-name"
+    (cd "$BS_TMP/a-considerably-longer-directory-name" && "$BS_R/build/brainstem" --trace \
+        -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null \
+        | sed "$BS_NORM" > "$BS_TMP/m2"
+    diff -u "$BS_TMP/m1" "$BS_TMP/m2"'
+# A read of a stream returns UP TO n bytes, so a program that asks for one
+# byte at a time and one that asks for several must agree about the CONTENT
+# even when they disagree about the grouping. bf/net/loopback.bf reads its
+# two bytes singly and bf/fs/roundtrip.bf reads its two in one call; the
+# bytes are "hi" in both, and that is a relation between two fixtures rather
+# than a property of either.
+run "one-byte reads and a single read agree about the bytes" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    whole=$( (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" \
+             "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null \
+             | sed -n "s/^brainstem: < 00 len=2 \(6869\)$/\1/p")
+    singly=$(./build/brainstem --trace -- ./build/bfi bf/net/loopback.bf </dev/null 2>&1 >/dev/null \
+             | sed -n "s/^brainstem: < 00 len=1 //p" | tr -d "\n")
+    test "$whole" = "$singly" || { echo "whole [$whole] singly [$singly]"; exit 1; }
+    test "$whole" = "6869" || { echo "neither read the expected bytes: [$whole]"; exit 1; }
+    exit 0'
+
 # TIER 6
 echo
 echo "== tier 6: error paths =="
@@ -930,28 +1042,11 @@ echo "== tier 10: platform parity =="
 # 0x0040, a stat field that is 32 bits in one place, and an errno that escaped
 # the map. At M3 none of those exist yet, which is exactly when to pin the
 # ones that do.
-# Two masks, and both are named here rather than left for somebody to reverse
-# engineer out of a regex.
-#
-# The hello reply is found by its MAGIC rather than by its length, because its
-# length now depends on how many preopens the run was given. The first version
-# matched len=48 and would have silently stopped matching anything at all the
-# moment a fixture took a preopen -- a mask that matches nothing does not
-# fail, it stops asking, which is the failure mode this whole tier fears.
-#
-# The THIRD mask is the handle table: thirty six bytes describing what the
-# broker's own stdin, stdout and stderr actually are. Those kinds and rights
-# are a property of HOW THE BROKER WAS INVOKED, not of the program or the
-# protocol, so pinning them made every trace fail on a guest whose stdio was
-# wired up differently. The name tail after it is deterministic and stays
-# pinned, and the handles themselves are checked on their own below.
-#
-# The second mask is stat's mtime, twelve bytes of it. A file's modification
-# time is not a property of the program and cannot be pinned; everything else
-# in the 32 byte record is. stat is the only 32 byte reply the pinned fixtures
-# produce, and the vacuity check below is what keeps both masks honest.
-BS_NORM='s/^\(brainstem: < 00 len=[0-9]* 4253544d.\{32\}\)../\1%%/;s/^\(brainstem: < 00 len=32 .\{24\}\).\{24\}/\1MMMMMMMMMMMMMMMMMMMMMMMM/;s/^\(brainstem: < 00 len=[0-9]* 4253544d.\{88\}\).\{72\}/\1HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH/'
-export BS_NORM
+# The two masks this tier depends on are defined at the top of this file,
+# beside BS_TMP, because tier 5a needs them too and a definition that sits
+# inside the tier that happened to want it first is one that quietly does not
+# exist yet for the tier that runs earlier. That is not hypothetical: it cost
+# two failing metamorphic checks and an unmasked mtime.
 
 
 run "clock.bf under a frozen clock matches the pinned trace" sh -c '

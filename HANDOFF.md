@@ -270,6 +270,7 @@ marker in the suite at all.
 | 3b | yes | 1 | the header does not lie: tools/bspoke.sh, six rules |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
 | 5 | yes | 23 | per-op round trip |
+| 5a | yes | 6 | metamorphic: change one knob, require the rest unchanged |
 | 6 | yes | 17 | error paths |
 | 7 | yes | 21 | determinism: seed, clocks, sorted walks, and --replay |
 | 8 | yes | 1 | interpreter semantics matrix |
