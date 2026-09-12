@@ -34,8 +34,14 @@ status.
     > 10 len=6      wait handle 8
     < 00 len=4      exited, code 0
 
-**M6 was gated at 173 pass, 0 fail on both guests.** M7's own gate number goes
-here when it lands. M5 was 159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
+**Gated: 208 pass, 0 fail on `freebsd-15.1` and 208 pass, 0 fail on
+`ubuntu-26.04`.** M6 was 173 on both guests, M5 was 159, M4 was 148, M3 was
+132, M2 was 94, M0 was 22.
+
+It took three gate runs, all three red on the same tier and none of them on
+the same cause. See the two traps on the compiler lowerings and on `bcmp`
+below; between them they are the best short answer this project has to why the
+two-guest gate is not optional.
 
 **M7 raises the gate's cost**, and it is worth knowing why before wondering
 about it: tier 11 is about seventy seconds on a quiet Linux container against
@@ -43,19 +49,40 @@ ten for everything else, because it rebuilds and re-runs once per mutation.
 That is the right trade exactly once per gate, and there is nothing to tune.
 
 M3 through M6 were each written in full before either guest ran them, and each
-passed the primary platform first time. **Every FreeBSD failure this project
-has had has been one of two shapes**, and they are worth telling apart because
-they call for different habits:
+passed the primary platform first time. M7 did not: it took three gate runs.
+**Every FreeBSD failure this project has had has been one of three shapes**,
+and they are worth telling apart because they call for different habits.
 
 1. **A fact about the platform written down instead of a mechanism for
    discovering it.** perl is in base, `strtonum` exists, `wc` does not pad, the
    timekeeping page serves `clock_gettime`, `arc4random_buf` costs one syscall.
    All at M2 and M3, all cured by `tests/syscalls/README` labelling unmeasured
    rows as unmeasured and by parsing two conventions instead of assuming one.
+
+   **M7 added a nastier version of this one: a mechanism that existed and was
+   not applied.** The optional `?` rows in `tests/audit/allow.txt` were built
+   at M3 for exactly the defect that then failed at M7, and the section comment
+   in that file explains it at length. I added a unit that prints and did not
+   extend the section. *A mechanism nobody is reminded of is a fact*, so R8
+   now reminds.
+
 2. **A pin that encoded something the program does not determine.** The
    handle table, at the preopen removal. Cured by masking it -- and see the
    trap below, because it also produced a symptom that looked like a race and
    sent me after the wrong thing.
+
+3. **An equivalence only the other toolchain can teach you.** `bcmp`, at M7.
+   clang rewrites `memcmp(a, b, n) != 0` into a different symbol and gcc does
+   not, so `normalise()` was incomplete in a way nothing runnable here could
+   reveal. This one is different in kind from the first two: it is not a guess
+   and not a bad pin, it is a list that can only be finished by running the
+   compiler I do not have.
+
+   **It has no cure on this side, and that is the honest statement of what the
+   two-guest gate is for.** The nearest thing available is a clang build of
+   the objects purely to run the audit against -- it needs no interpreter, no
+   fixtures and no kernel, only `nm` -- and it was not taken because it would
+   be a second definition of the toolchain. Worth weighing at M8.
 
 Nothing has been guessed since the first of those, and nothing is pinned now
 that the program does not determine.
