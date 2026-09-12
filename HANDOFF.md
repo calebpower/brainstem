@@ -20,16 +20,27 @@ status.
     < 00 len=4      exited, code 0
 
 **Gated: 173 pass, 0 fail on `freebsd-15.1` and 173 pass, 0 fail on
-`ubuntu-26.04`** -- including the removal of the preopen model, which touched
-every fixture in the tree, and the stream-read fix. M5 was 159 on both guests, M4 was 148, M3 was 132, M2 was
-94, M0 was 22.
+`ubuntu-26.04`.** That covers the removal of the preopen model, which touched
+every fixture in the tree, and the stream read that followed it. M6 was 172 on
+both guests, M5 was 159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
 
-M3, M4, M5 and M6 were each written in full before either guest ran them, and
-each passed the primary platform first time. The three FreeBSD failures this
-project has had were all at M2 and M3 and were all the same shape -- a
-specific FACT about the platform written down instead of a MECHANISM for
-discovering it. Nothing has been guessed since `tests/syscalls/README` started
-labelling unmeasured rows as unmeasured.
+M3 through M6 were each written in full before either guest ran them, and each
+passed the primary platform first time. **Every FreeBSD failure this project
+has had has been one of two shapes**, and they are worth telling apart because
+they call for different habits:
+
+1. **A fact about the platform written down instead of a mechanism for
+   discovering it.** perl is in base, `strtonum` exists, `wc` does not pad, the
+   timekeeping page serves `clock_gettime`, `arc4random_buf` costs one syscall.
+   All at M2 and M3, all cured by `tests/syscalls/README` labelling unmeasured
+   rows as unmeasured and by parsing two conventions instead of assuming one.
+2. **A pin that encoded something the program does not determine.** The
+   handle table, at the preopen removal. Cured by masking it -- and see the
+   trap below, because it also produced a symptom that looked like a race and
+   sent me after the wrong thing.
+
+Nothing has been guessed since the first of those, and nothing is pinned now
+that the program does not determine.
 
 ### THE PREOPEN MODEL WAS REMOVED, AFTER M6 AND BEFORE THE FREEZE
 
