@@ -1,0 +1,82 @@
+# loopback.poke -- bind an ephemeral port, listen, connect to it, accept,
+# and send two bytes through the socket to itself.
+#
+# THIS FIXTURE NEEDS NO SECOND PROCESS, and that is the whole design. The
+# plan for this milestone called for a netecho helper in tools/, so the tier
+# would not depend on nc -- whose flags differ between the two guests. A
+# program that talks to ITSELF removes the helper as well: no second binary,
+# no port to agree on out of band, and nothing to leave running if the suite
+# is interrupted.
+#
+# It is possible because bind REPLIES WITH THE ADDRESS ACTUALLY BOUND. There
+# is no getsockname op, so that reply is the only way a program can learn the
+# ephemeral port it was given -- and this fixture reads those two bytes and
+# emits them straight back in the connect frame.
+#
+# THE PORT IS CARRIED IN RAW BRAINFUCK, because it is a value and not a
+# literal, and bfgen only ever writes literals. Cell 0 is the working cell
+# every EMIT and READ uses; the two raw blocks below park the port in cells 1
+# and 2 and later read them out. bfgen passes raw brainfuck through untouched
+# and forgets what it thought cell 0 held, which is exactly the contract that
+# makes this safe.
+#
+# Frames transcribed by hand from ABI.md sections 3, 6, 7.5 to 7.9 and 7.10.
+#
+#   hello  op 01, len 10.  No preopens here: this program touches no
+#   filesystem at all, which is also the point -- see ABI.md section 8.1.
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   socket  op 05, domain 1 IPv4, type 1 stream, protocol 0.  Handle 1.
+EMIT 05 03 00 01 01 00
+READ 7
+#   bind  op 07, handle 1, flags 1 REUSEADDR, then the 32 byte address:
+#   family 01, reserved 00, port 0000 meaning "any", then 127.0.0.1 in
+#   READING ORDER and twenty four zero bytes.  Those zeros cost nothing to
+#   emit -- '.' on a cell never touched -- and buy a constant offset.
+EMIT 07 26 00 01 00 00 00 01 00
+EMIT 01 00 00 00 7f 00 00 01
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+#   the reply is status, two length bytes, then the address bound.  Drain the
+#   status, the length, the family and the reserved byte: five bytes.
+READ 5
+#   now the two port bytes, into cells 1 and 2, little endian as they lie
+>,>,<<
+#   and the remaining twenty eight bytes of the address record
+READ 28
+#   listen  op 08, handle 1, backlog 0 meaning 128
+EMIT 08 06 00 01 00 00 00 00 00
+READ 3
+#   socket  op 05 again.  Handle 2, the client.
+EMIT 05 03 00 01 01 00
+READ 7
+#   connect  op 06, handle 2, flags 0, family 01, reserved 00 ...
+EMIT 06 26 00 02 00 00 00 00 00 01 00
+#   ... then the port this program was given, straight out of cells 1 and 2 ...
+>.>.<<
+#   ... then 127.0.0.1 and twenty four zeros.
+EMIT 7f 00 00 01
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+READ 3
+#   accept  op 09, handle 1, flags 0.  The reply is a handle and the peer
+#   address: 3 header + 4 + 32 = 39 bytes.  Handle 3.
+EMIT 09 06 00 01 00 00 00 00 00
+READ 39
+#   write  op 0b, handle 2 (the client end), flags 0, "hi"
+EMIT 0b 08 00 02 00 00 00 00 00 68 69
+READ 5
+#   read  op 0a, handle 3 (the accepted end), n 8, flags 0.  Two bytes come
+#   back, and they came through a real TCP socket.
+EMIT 0a 08 00 03 00 00 00 08 00 00 00
+READ 5
+#   close all three, youngest first
+EMIT 0c 04 00 03 00 00 00
+READ 3
+EMIT 0c 04 00 02 00 00 00
+READ 3
+EMIT 0c 04 00 01 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

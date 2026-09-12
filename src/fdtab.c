@@ -20,6 +20,7 @@ void bs_fdtab_init(void) {
         tab[i].name    = 0;
         tab[i].namelen = 0;
         tab[i].preopen = 0;
+        tab[i].netstate = 0;
     }
 }
 
@@ -43,6 +44,7 @@ bs_err bs_fdtab_alloc(bs_u8 kind, bs_u16 rights, bs_osfd fd, bs_u32 *handle) {
         tab[i].name    = 0;
         tab[i].namelen = 0;
         tab[i].preopen = 0;
+        tab[i].netstate = 0;
         *handle = handle_of(i);
         return BS_OK;
     }
@@ -104,6 +106,7 @@ bs_err bs_fdtab_free(bs_u32 handle) {
     tab[i].name    = 0;
     tab[i].namelen = 0;
     tab[i].preopen = 0;
+    tab[i].netstate = 0;
     /* The slot is free and its generation has moved on. Wrapping at 16 bits
      * is fine and is not a hole: a handle from 65536 closes ago is one the
      * program stopped being able to name long before the number came round,

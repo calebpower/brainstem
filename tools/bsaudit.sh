@@ -196,7 +196,11 @@ audit() {
     done < "$tmp/handlers"
 
     # R7 -- one seam, and the one build.sh chose
-    seams=$(awk '{ print $1 }' "$listing" | grep '^sys_' | grep -v '^sys_posix$' | sort -u || true)
+    # The PLATFORM halves, by name. sys_posix and sys_net are portable halves
+    # of the seam and there may be more; listing what a platform object can be
+    # called is more durable than listing what it cannot, and it is the same
+    # by-name principle as IGNORABLE above.
+    seams=$(awk '{ print $1 }' "$listing" | grep -E '^sys_(freebsd|linux|win32|darwin|openbsd|netbsd)$' | sort -u || true)
     n=$(printf '%s\n' "$seams" | grep -c . || true)
     if [ "$n" != 1 ]; then
         say_fail "R7 $n platform objects are linked: $(echo $seams)"

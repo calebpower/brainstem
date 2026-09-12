@@ -73,6 +73,12 @@ struct bs_slot {
     const char *name;      /* a preopen's name, pointing into argv, or null */
     bs_u8    namelen;
     int      preopen;      /* named on the command line rather than derived */
+    /* A non-blocking connect in flight. The seam reads and writes it, so the
+     * mechanism stays at the seam and the STATE stays on the handle, where
+     * the rest of a socket's identity already lives. It is what lets a
+     * re-issued connect mean 'how did that go' with no getsockopt op in the
+     * ABI at all. */
+    int      netstate;
 };
 
 void bs_fdtab_init(void);

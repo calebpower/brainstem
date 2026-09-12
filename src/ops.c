@@ -27,6 +27,11 @@ bs_err op_fs_readdir(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_fs_unlink (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_fs_mkdir  (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_fs_rename (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_net_socket (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_net_connect(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_net_bind   (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_net_listen (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_net_accept (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 
 static const struct bs_op bs_ops[] = {
 #define OP(c, n, f, q, p) { (c), #n, f, (q), (p) },

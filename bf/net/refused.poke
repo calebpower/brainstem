@@ -1,0 +1,69 @@
+# net/refused.poke -- every way the socket ops say no.
+#
+# As with the filesystem refusals, the conversation CONTINUES THROUGH ALL OF
+# THEM: each status here is recoverable, the error reply carries no payload,
+# and the stream stays in step.
+#
+# Two of these are worth reading twice. Family 3 Unix answers NOTSUP rather
+# than working, because a Unix socket address in this ABI is a preopened
+# directory handle plus a relative path, FreeBSD has bindat and connectat
+# which take exactly that, and Linux has neither -- an op needing a different
+# mechanism on the two platforms is the thing this project will not ship. And
+# connect on a LISTENER is refused from the handle's kind, before any syscall,
+# because the two kernels do not agree on which errno that is.
+#
+# Frames transcribed by hand from ABI.md sections 4, 6 and 7.5 to 7.9.
+#
+#   hello  op 01, len 10
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   socket with domain 9 -- INVAL 06
+EMIT 05 03 00 09 01 00
+READ 3
+#   socket with domain 3 Unix -- NOTSUP 17, declared and not built
+EMIT 05 03 00 03 01 00
+READ 3
+#   socket with protocol 1 -- INVAL 06.  There is exactly one protocol per
+#   domain and type this ABI can express.
+EMIT 05 03 00 01 01 01
+READ 3
+#   socket with type 9 -- INVAL 06
+EMIT 05 03 00 01 09 00
+READ 3
+#   a real socket.  Handle 1.
+EMIT 05 03 00 01 01 00
+READ 7
+#   connect to 127.0.0.1 port 1, where nothing listens -- CONNREFUSED 20.
+#   A pinned status rather than an errno: ECONNREFUSED is 61 on FreeBSD and
+#   111 on Linux, and a program branching on the raw number would behave
+#   differently on the two.
+EMIT 06 26 00 01 00 00 00 00 00 01 00 01 00 7f 00 00 01
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+READ 3
+#   accept on a socket that was never listened on -- BADF 03, from the kind
+EMIT 09 06 00 01 00 00 00 00 00
+READ 3
+#   close it; the slot frees and its generation moves on
+EMIT 0c 04 00 01 00 00 00
+READ 3
+#   a second socket takes the same slot back, so its handle is 0x00010001
+EMIT 05 03 00 01 01 00
+READ 7
+#   listen on it.  The kind becomes listener and READ, WRITE and CONNECT are
+#   dropped from its rights -- rights only ever narrow.
+EMIT 08 06 00 01 00 01 00 00 00
+READ 3
+#   connect on the listener -- ISCONN 26
+EMIT 06 26 00 01 00 01 00 00 00 01 00 01 00 7f 00 00 01
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+READ 3
+#   read from the listener -- DENIED 04, because listen took the right away
+EMIT 0a 08 00 01 00 01 00 08 00 00 00
+READ 3
+EMIT 0c 04 00 01 00 01 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

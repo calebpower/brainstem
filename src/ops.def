@@ -38,11 +38,11 @@ OP(0x03, CLOCK_NOW,    op_time_clock_now, 1,   12)
 OP(0x04, RANDOM_BYTES, op_rand_bytes,  2,     BS_VAR)
 
 /* ---- net --------------------------------------------------------------- */
-OP(0x05, SOCKET,       NULL,           3,     4)
-OP(0x06, CONNECT,      NULL,          38,     0)
-OP(0x07, BIND,         NULL,          38,     32)
-OP(0x08, LISTEN,       NULL,           6,     0)
-OP(0x09, ACCEPT,       NULL,           6,     36)
+OP(0x05, SOCKET,       op_net_socket,  3,     4)
+OP(0x06, CONNECT,      op_net_connect,38,     0)
+OP(0x07, BIND,         op_net_bind,   38,     32)
+OP(0x08, LISTEN,       op_net_listen,  6,     0)
+OP(0x09, ACCEPT,       op_net_accept,  6,     36)
 
 /* ---- io: files, pipes and sockets alike -------------------------------- */
 OP(0x0A, READ,         op_io_read,     8,     BS_VAR)

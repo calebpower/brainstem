@@ -290,7 +290,7 @@ Milestones, each ending in a committable unit green on **both** guests.
 | **M2** | a standard brainfuck program completes a round trip. Three `ctl` ops, which do not cross the seam, so deadlock and timeout are settled at zero platform cost **before twenty more ops inherit them**. |
 | **M3** | **done.** The seam, `clock_now` and `random_bytes`, `--seed` and `--clock`, and the two measured tiers. Four of twenty three. |
 | **M4** | **done.** Handles with generations, preopens, and eleven ops: the filesystem and the bytes that move through it. Fifteen of twenty three. |
-| **M5** | net. |
+| **M5** | **done.** Five net ops, IPv4 and IPv6. No `netecho` helper was needed: the fixture connects to itself, which removes the second process the plan assumed. Twenty of twenty three. |
 | **M6** | proc. 23 of 23. |
 | **M7** | the tiers that need all of it: mutation, cross-op metamorphic. ABI frozen. |
 | **M8** | the purity audit. |

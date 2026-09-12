@@ -432,7 +432,22 @@ wanting whole seconds reads eight bytes and discards four.
 ### 7.5 `socket` — `domain{u8} type{u8} protocol{u8}` → `handle`
 
 `domain` 1 IPv4, 2 IPv6, 3 Unix. `type` 1 stream, 2 datagram. `protocol` must
-be 0. brainstem's own numbers, necessarily. Sockets are created blocking and
+be 0.
+
+**Family 3 Unix is declared and not built.** It answers `NOTSUP` on both
+platforms, which is a different answer from `INVAL` and deliberately so: a
+declared-but-absent family tells a program "not here", a family that is not in
+the ABI at all tells it "no such thing", and collapsing the two sends someone
+looking at their own encoder.
+
+The reason is the same one that keeps `RENAME_NOREPLACE` out of §7.23. A Unix
+socket address in this ABI is a preopened directory handle plus a relative
+path, because there are no absolute paths here. FreeBSD has `bindat(2)` and
+`connectat(2)`, which take exactly that. Linux has neither, and the
+workarounds — `fchdir` around the call, or `/proc/self/fd/N` — are
+respectively racy and Linux-only. An op needing a different mechanism on the
+primary and the secondary platform is the thing this ABI will not ship. The
+record layout stays specified so a later minor version can fill it in. brainstem's own numbers, necessarily. Sockets are created blocking and
 close-on-exec; blocking is a per-call flag, never socket state, so there is no
 `fcntl` op and no hidden mode.
 
@@ -663,12 +678,36 @@ REACH.** Do not preopen a directory whose contents you do not control and
 expect the result to be a sandbox. brainstem is not a sandbox (CONVENTIONS,
 named non-goals), and this is one of the reasons why.
 
-### 8.1 Command line
+### 8.1 The network is NOT bounded by this, and that is an open question
+
+Section 8 says "no ambient network access". **As of M5 that is false and the
+sentence is corrected here rather than left standing.** `socket` succeeds with
+no flag, and `connect` will reach any address the host can route to. The
+preopen set bounds the **filesystem** and does not bound the network.
+
+That is not an oversight, it is an unresolved design decision, and it is
+recorded rather than quietly settled in either direction. Making it true would
+need a capability gate on socket creation — and the project's own milestone
+plan says there is no `--allow` capability surface in v1, with the capability
+work arriving at M8 alongside `sys_lockdown()`. Putting one in at M5 would
+contradict that decision; leaving the sentence in contradicted the code. The
+sentence loses.
+
+Until it is settled: **a brainstem program can open a socket to anywhere.**
+Treat the broker as having the network reach of the account it runs as,
+because it does.
+
+`--preopen-listen` and `--preopen-connect` are deferred to M7 for the same
+reason. They are capability plumbing, and plumbing whose value depends
+entirely on how the question above is answered should land with that answer
+rather than before it.
+
+### 8.1.1 Command line
 
 `--preopen-dir NAME=PATH`, `--preopen-file NAME=PATH:MODE`,
-`--preopen-fd NAME=N`, `--preopen-listen NAME=ADDR`,
-`--preopen-connect NAME=ADDR`. Handles are assigned in command-line order
-starting at index 1.
+`--preopen-fd NAME=N`. Handles are assigned in command-line order starting at
+index 1. `--preopen-listen` and `--preopen-connect` are specified above and
+are M7.
 
 Positional, with no name-discovery op. WASI has one because a WASI program can
 usefully compare strings; a brainfuck program cannot, and there is nothing

@@ -6,105 +6,80 @@ is actually built and where it has already bitten.
 
 ## State
 
-**Milestone M4 — the program has a filesystem.** A file containing nothing but
-the eight brainfuck instructions creates a directory, creates a file, writes
-to it, reads it back, seeks, stats, renames, unlinks, and enumerates what is
-left.
+**Milestone M5 — the program has a network.** A file containing nothing but
+the eight brainfuck instructions binds an ephemeral TCP port, listens,
+connects to itself, accepts the connection, and sends bytes through it.
 
-    > 11 len=9      open "f", WRITE|CREATE|TRUNC, mode 0644
-    < 00 len=4      OK, handle 2
-    > 0c len=4      close handle 2
-    < 00 len=0      OK
-    > 11 len=9      open "f", READ
-    < 00 len=4      OK, handle 0x00010002 -- same slot, next generation
+    > 07 len=38     bind handle 1, 127.0.0.1 port 0
+    < 00 len=32     OK, and the port it actually got
+    > 06 len=38     connect handle 2 to that same port
+    < 00 len=36     accept: handle 3 and the peer address
 
-**Gated: 148 pass, 0 fail on `freebsd-15.1` and 148 pass, 0 fail on
-`ubuntu-26.04`.** M3 was 132 on both guests, M2 was 94, M0 was 22.
+**Gated on Linux: 159 pass, 0 fail in the container lane. THE FREEBSD HALF OF
+M5 HAS NOT RUN.** M4 was 148 on both guests, M3 was 132, M2 was 94, M0 was 22.
 
-**The FreeBSD half passed first time, and this was the largest platform
-surface the project has added in one go** -- nineteen seam calls, a handle
-table, preopens and eleven ops, none of it runnable from the development host
-before it was pushed. That is the second time a blind write has held (M0 was
-the first) and it is worth saying why, because the three failures in between
-had a shape and this did not.
+Twenty of the twenty three ops are built. `pipe`, `spawn` and `wait` remain
+and are M6.
 
-Everything that failed on FreeBSD at M2 and M3 was a place where a SPECIFIC
-FACT about the platform had been written down: perl is in base, `strtonum`
-exists, `wc` does not pad, the timekeeping page serves `clock_gettime`,
-`arc4random_buf` costs one syscall. Everything that held was a MECHANISM for
-discovering the fact instead: `bsaudit` parses two `nm` conventions, `bscalls`
-parses `kdump` and `strace` in one file, the seam names no POSIX type, and
-`readdir` stats unconditionally rather than trusting a `d_type` that neither
-kernel is obliged to fill in.
+### THE OPEN QUESTION M5 FOUND, which is not mine to close
 
-That is the rule this project has actually learned. Write the mechanism, not
-the fact -- and where a fact is unavoidable, label it as unmeasured in the
-file that holds it, which is what `tests/syscalls/README` does.
+ABI.md section 8 said "no ambient network access". **That was false the moment
+`socket` was built, and the sentence is corrected rather than left standing.**
+`socket` takes no capability, `connect` reaches anywhere the host can route,
+and the preopen set bounds the filesystem and nothing else.
 
-Fifteen of the twenty three ops are built. The other eight are declared in
-`src/ops.def` with a NULL handler and answer NOSUCHOP, which is recoverable.
+Making it true needs a capability gate on socket creation. The milestone plan
+says there is **no `--allow` capability surface in v1**, with capability work
+arriving at M8 beside `sys_lockdown()`. So adding a gate at M5 would
+contradict a decision that was made deliberately, and leaving the sentence
+contradicted the code. The sentence lost, and the decision is flagged here
+instead of being made quietly in either direction.
 
-### What M4 added, and the two things to know before changing it
+If the answer is "gate it", the change is one line in `op_net_socket` plus a
+flag, and `--preopen-listen` and `--preopen-connect` should land with it --
+which is why those two moved from M5 to M7 rather than being built now.
+Capability plumbing whose value depends on an unanswered question should
+arrive with the answer.
 
-- **`src/fdtab.c`, the handle table.** A handle is `(gen << 16) | index`,
-  never an OS fd. Generations start at 0 so the first handle is simply its
-  index, and only a reused slot carries one — the common case stays cheap to
-  emit and the dangerous case stays unforgeable. `bf/fs/roundtrip.poke`
-  demonstrates it in the trace on purpose.
-- **`src/preopen.c`.** Specs are collected while argv is parsed and installed
-  once, before the child starts, so a typo in the fifth preopen is reported
-  before the first has touched the filesystem.
-- **`src/op_io.c` and `src/op_fs.c`.** Both units reference NOTHING outside
-  themselves — the audit measures that, and it is the strongest single
-  statement in `tests/audit/allow.txt`.
-- **The seam grew nineteen calls and no exceptions.** Everything an op needs
-  goes through `sys.h`, which still names no POSIX type. `bs_osfd` is a
-  `bs_i64` rather than an `int` for the same reason `bs_time` is not a
-  `timespec`.
+### What M5 added
 
-**The two things that will bite.**
+- **`src/sys_net.c`**, split out of `sys_posix.c` because this is where the
+  two kernels disagree most and the file is worth reading alone. `AF_INET6` is
+  28 on FreeBSD and 10 on Linux; FreeBSD's `sockaddr_in` has a leading
+  `sin_len` byte and Linux's does not. Every one of those numbers dies in that
+  file and nothing above it can name one.
+- **Non-blocking connect with no `getsockopt` op.** Connect with NOWAIT, get
+  AGAIN, poll for writable, and re-issue the identical frame; the broker reads
+  `SO_ERROR` and reports. The in-flight state lives on the handle
+  (`bs_slot.netstate`) and the mechanism lives at the seam.
+- **No `netecho` helper, and it is not missing.** The plan called for one so
+  the tier would not depend on `nc`, whose flags differ between the guests. A
+  program that talks to *itself* removes the helper too: no second binary, no
+  port agreed out of band, nothing left running if the suite is interrupted.
+  That is strictly better than the design it replaces, which is why it is
+  recorded here rather than listed as a gap.
 
-`sys_dir_open` **dups the descriptor**, because `fdopendir` takes ownership and
-`closedir` closes what it was given. The caller still owns its own fd and is
-entitled to `stat` and `openat` through it afterwards. Getting this wrong
-gives a handle whose descriptor dies when enumeration ends, which presents as
-the *next* op on that handle failing for no visible reason.
+### The M5 fixture is the most interesting one in the tree
 
-`readdir` **always costs a stat**, deliberately. The obvious version reads
-`d_type` and stats only on `DT_UNKNOWN`, but `d_type` is not POSIX: glibc
-hides it unless `_DEFAULT_SOURCE` is defined, and `sys_posix.c` may not be
-compiled with a namespace widening macro. Reaching for it would have meant
-moving `readdir` into both platform files or widening the portable half's
-namespace, to save one syscall on an op that already costs a round trip
-through a brainfuck interpreter. Statting unconditionally also makes the
-platforms identical by construction: neither kernel is obliged to fill
-`d_type` in, so a version that trusted it could produce different bytes on two
-filesystems of the *same* platform.
+`bf/net/loopback.poke` carries a VALUE rather than a literal. `bind` answers
+with the port it actually bound -- there is no `getsockname` op, and that
+reply is the entire reason there does not need to be one -- and the program
+reads those two bytes and emits them back inside the `connect` frame.
 
-### What M4 deliberately did not do
+That is raw brainfuck, `>,>,<<` and `>.>.<<`, because `bfgen` only ever writes
+literals and adding a "save this byte" directive would have made it choose a
+tape layout, which is the line between an expander and a compiler that
+CONVENTIONS section 6 refuses to cross. It works because `READ` emits only
+commas and never moves the pointer, so cell 0 is the working cell and cells 1
+and 2 are free. Anything else that needs to carry a value between frames
+should be written the same way.
 
-**Confinement is still the broker's own string check.** Absolute paths and
-`..` components are refused; a **symlink** out of a preopened directory is
-not. ABI.md §8.0 says so in a table rather than implying otherwise — an
-earlier draft of that section claimed the kernel was doing it, which was never
-true and is now corrected. Both platforms can close the gap and neither does
-it the same way, so both land at M8 beside `sys_lockdown()`.
-
-**`--sort-readdir` does not exist.** Sorting means holding a whole directory
-at once and there is no allocation on the ABI path, so it needs a bounded
-design rather than an afternoon. It is M7. Until then a test that cares about
-directory order must use a directory with one entry in it, which is what
-`bf/fs/roundtrip.poke` does and why.
-
-**The filesystem ops are not in tier 10a yet, and that is a decision.** The
-syscall expectations for FreeBSD cannot be written from this development host
-without guessing, and guessing has cost two round trips already this project.
-So the suite MEASURES them on both guests and PRINTS what it saw —
-`sh tools/bscalls.sh --report`, run from tier 10a — and the run that prints
-them is the run that produces the expectation. Paste them into
-`tests/syscalls/<platform>/` and move the case from `observe_cases()` into
-`cases()`. Linux currently reports, for `fs.roundtrip`: 2 brk, 3 fcntl,
-5 fstat, 2 getdents64, 1 lseek, 1 mkdirat, 2 open, 1 renameat, 1 unlinkat.
+There is no pinned trace for the net fixtures, deliberately. The ephemeral
+port differs every run, so a byte-identical trace is impossible without
+masking it -- and the bind reply is 32 bytes, exactly like a stat reply, so a
+mask keyed on the length would corrupt the other one. The net checks assert
+structure instead, including the one that matters: the port in the connect
+frame must equal the port bind returned.
 
 ### What the gate found that this host could not
 
@@ -183,8 +158,8 @@ marker in the suite at all.
 | 3a | yes | 2 | fixture legibility, and the expander knows no ABI |
 | 3b | no | 0 | the header does not lie — needs bsframe --decode wiring |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | yes | 12 | per-op round trip |
-| 6 | yes | 12 | error paths |
+| 5 | yes | 16 | per-op round trip |
+| 6 | yes | 15 | error paths |
 | 7 | yes | 12 | determinism: seed, frozen and virtual clock, both polarities |
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
@@ -442,20 +417,19 @@ for.
 
 M0 through M3 are done. What remains:
 
-1. **M5 — net.** `socket`, `connect`, `bind`, `listen`, `accept`, plus
-   `tools/netecho.c` so the tier depends on no `nc` — whose flags differ
-   between the two guests, which is a divergence forty lines of C removes.
-2. **M6 — proc.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and
+1. **M6 — proc.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and
    last because it is the hairiest: fd leaks, zombies, and `SIGCHLD` racing the
    broker's own reaping of the interpreter. **This is the payoff** — a
    brainfuck program spawning an interpreter on a second brainfuck program is
    what makes brainfuck itself the harness that can chain bfsodium's
    primitives.
-3. **M7 — the tiers that need all of it.** Tier 11 swept across every op;
+2. **M7 — the tiers that need all of it.** Tier 11 swept across every op;
    metamorphic checks spanning ops. ABI.md frozen. `--replay`. Also
-   `--sort-readdir`, and moving the filesystem cases out of `bscalls`'
-   report list and into its pinned list.
-4. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
+   `--sort-readdir`, moving the filesystem cases out of `bscalls`' report
+   list and into its pinned list, and `--preopen-listen` /
+   `--preopen-connect` -- which should land with whatever answer the
+   ambient-network question above gets.
+3. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
    `cap_enter()` on FreeBSD. Expect ABI additions, since `cap_enter()` forces
    the preopen model onto `open`.
 

@@ -28,44 +28,38 @@ is also what makes the broker indifferent to which language is on the far end.
 
 ## Status
 
-**It works, for fifteen of twenty three operations.** A file containing
-nothing but the eight brainfuck instructions, run under a general purpose
-interpreter, now creates a directory, creates a file, writes to it, reads it
-back, seeks it, stats it, renames it, removes it and enumerates what is left:
+**It works, for twenty of twenty three operations.** A file containing nothing
+but the eight brainfuck instructions binds an ephemeral TCP port, listens,
+connects to itself, accepts, and sends bytes through the socket:
 
 ```
-> 11 len=9      open "f", WRITE|CREATE|TRUNC, mode 0644
-< 00 len=4      OK, handle 2
-> 0b len=8      write handle 2, "hi"
-< 00 len=2      OK, 2 bytes written
-> 0c len=4      close handle 2
+> 07 len=38     bind handle 1, 127.0.0.1 port 0
+< 00 len=32     OK, and the port it actually got
+> 06 len=38     connect handle 2 to that same port
 < 00 len=0      OK
-> 11 len=9      open "f", READ
-< 00 len=4      OK, handle 0x00010002 -- same slot, next generation
+> 09 len=6      accept on handle 1
+< 00 len=36     OK, handle 3 and the peer address
+> 0b len=8      write handle 2, "hi"
+> 0a len=8      read handle 3
+< 00 len=2      6869
 ```
 
-That last line is the point of ABI.md §5. The slot was reused and the handle
-was not: a program still holding the old one gets `BADF` rather than somebody
-else's file.
+It needs no second process and no agreed port number, because `bind` replies
+with the address actually bound — and the program carries those two bytes from
+the reply into the connect frame in raw brainfuck.
 
-Milestone M4, **gated: 148 pass, 0 fail on `freebsd-15.1` and on
-`ubuntu-26.04`.** `ctl.hello`, `ctl.exit`, `time.clock_now`, `rand.random_bytes`,
-`io.read`, `io.write`, `io.close`, `io.poll`, `fs.open`, `fs.seek`, `fs.stat`,
-`fs.readdir`, `fs.unlink`, `fs.mkdir` and `fs.rename` are built. The other
-eight are declared and answer NOSUCHOP, which is recoverable — the payload is
-consumed and the stream stays in step, because that is the forward
-compatibility path for a program written against a later version.
+Milestone M5. Three ops remain: `pipe`, `spawn` and `wait`, which are M6 and
+are the payoff — they are how one brainfuck program drives another.
 
-**Nothing is reachable that was not named on the command line.** There are no
-absolute paths in the ABI; every filesystem op resolves beneath a preopened
-directory. Read ABI.md §8.0 for exactly what enforces that today and what does
-not — in particular, a symlink out of a preopened directory is **not** refused
-yet. brainstem is not a sandbox.
+**Two boundaries worth knowing before you run this.** Filesystem access is
+bounded by what you preopen, with the gap described in ABI.md §8.0. **Network
+access is not bounded at all** — `socket` takes no capability and `connect`
+reaches anywhere the host can route. ABI.md §8.1 says so and explains why that
+is currently an open question. brainstem is not a sandbox.
 
 ## The operations
 
-Twenty-three, specified in [ABI.md](ABI.md). Fifteen are built; the rest
-answer NOSUCHOP until their milestone.
+Twenty-three, specified in [ABI.md](ABI.md). Twenty are built.
 
 | | |
 |---|---|
@@ -74,7 +68,7 @@ answer NOSUCHOP until their milestone.
 | `random_bytes` | **built** — from the kernel, or from a seed with `--seed` |
 | `read` `write` `close` `poll` | **built** — files, pipes and sockets alike |
 | `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | **built** — beneath a preopened directory |
-| `socket` `connect` `bind` `listen` `accept` | M5 |
+| `socket` `connect` `bind` `listen` `accept` | **built** — IPv4 and IPv6; Unix is declared and answers NOTSUP |
 | `pipe` `spawn` `wait` | M6 — **which is how one program drives another** |
 
 ## Other languages

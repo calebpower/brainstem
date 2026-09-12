@@ -179,6 +179,70 @@ typedef struct {
     bs_u8   err;
 } bs_pollfd;
 
+/* ---- sockets ------------------------------------------------------------ */
+/* brainstem's own numbers again, and here the divergence is at its worst:
+ * AF_INET6 is 28 on FreeBSD and 10 on Linux, SOCK_DGRAM is 2 on both but
+ * SOCK_STREAM's neighbours are not, and FreeBSD's sockaddr_in carries a
+ * leading length byte that Linux's does not. None of that reaches a frame. */
+#define BS_AF_NONE   0
+#define BS_AF_INET   1
+#define BS_AF_INET6  2
+#define BS_AF_UNIX   3
+
+#define BS_SOCK_STREAM 1
+#define BS_SOCK_DGRAM  2
+
+/* The address record, ABI.md section 6, parsed. Thirty two bytes on the wire
+ * for EVERY family, with up to twenty four zero padding bytes, because a zero
+ * byte is free to emit in brainfuck -- '.' on a cell never touched -- and the
+ * padding buys a constant offset and a constant length in both directions.
+ * This is the clearest case in the whole design where the brainfuck cost
+ * model inverts an ordinary engineering instinct.
+ *
+ * PORT IS HOST ORDER, little-endian like every other integer here, and the
+ * broker byte-swaps. The ADDRESS is in reading order, because it is a byte
+ * string rather than an integer: 192.168.1.10 has no endianness and writing
+ * it backwards would be a legibility trap. Those two look inconsistent and
+ * are not. */
+typedef struct {
+    bs_u8  family;
+    bs_u16 port;
+    bs_u8  body[28];
+} bs_addr;
+
+/* Sockets are created BLOCKING and close-on-exec. Blocking is a per-call flag
+ * and never socket state, which is why there is no fcntl op and no hidden
+ * mode a program could get stuck in. */
+bs_err sys_socket(bs_u32 domain, bs_u32 type, bs_osfd *out);
+
+/* NON-BLOCKING CONNECT, without a getsockopt op existing.
+ *
+ * *state is 0 for a fresh attempt and 1 while one is in flight; the seam
+ * reads it and writes it back, so the state lives on the handle where the
+ * rest of a socket's identity lives, and the mechanism lives here. The
+ * program's side of this is: connect with NOWAIT, get AGAIN, poll for
+ * writable, and RE-ISSUE THE IDENTICAL CONNECT. The broker recognises the
+ * in-progress state and reports the result, which is what lets the ABI have
+ * no getsockopt at all. */
+bs_err sys_connect(bs_osfd fd, const bs_addr *a, int nowait, int *state);
+
+/* Replies with the address ACTUALLY bound, which is what makes port 0 usable:
+ * there is no getsockname op, so without this an ephemeral port could never
+ * be discovered by the program that asked for one. */
+bs_err sys_bind(bs_osfd fd, const bs_addr *a, int reuseaddr, bs_addr *bound);
+
+bs_err sys_listen(bs_osfd fd, bs_u32 backlog);
+bs_err sys_accept(bs_osfd fd, int nowait, bs_osfd *out, bs_addr *peer);
+
+/* Family 3 Unix is DECLARED BY THE ABI AND NOT BUILT, and the reason is a
+ * platform divergence rather than a shortage of time: every path in this ABI
+ * resolves beneath a preopened directory handle, FreeBSD has bindat(2) and
+ * connectat(2) which take exactly that, and Linux has neither. The
+ * workarounds are respectively racy and Linux-only. An op that needed a
+ * different mechanism on the two platforms is the thing this project will
+ * not ship, so family 3 answers NOTSUP on both. */
+bs_u8 sys_net_family_supported(bs_u32 family);
+
 /* ---- the filesystem half of the seam ------------------------------------
  *
  * Every path is RELATIVE TO A DIRECTORY DESCRIPTOR. There is no call here

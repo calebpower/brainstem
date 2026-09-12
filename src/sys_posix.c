@@ -76,6 +76,28 @@ bs_err sys_errmap(int e) {
 #endif
     case EFBIG:    return BS_NOSPC;
     case EDQUOT:   return BS_NOSPC;
+    /* The net family. These were missing until M5 and ECONNREFUSED arrived on
+     * the wire as IO -- "an errno that escaped the map", which is the exact
+     * phrase CONVENTIONS uses for what the platform parity tier is for. It
+     * was a net fixture that found it, on the first run, which is the
+     * argument for writing the refusal fixture at the same time as the op. */
+    case ECONNREFUSED:  return BS_CONNREFUSED;
+    case ECONNRESET:    return BS_CONNRESET;
+    case ECONNABORTED:  return BS_CONNRESET;
+    case EADDRINUSE:    return BS_ADDRINUSE;
+    case EADDRNOTAVAIL: return BS_ADDRNOTAVAIL;
+    case ENETUNREACH:   return BS_NETUNREACH;
+    case EHOSTUNREACH:  return BS_NETUNREACH;
+    case ENETDOWN:      return BS_NETUNREACH;
+    case ENOTCONN:      return BS_NOTCONN;
+    case EISCONN:       return BS_ISCONN;
+    case EMSGSIZE:      return BS_MSGSIZE;
+    case ETIMEDOUT:     return BS_TIMEDOUT;
+    case EAFNOSUPPORT:  return BS_NOTSUP;
+    case EPROTONOSUPPORT: return BS_NOTSUP;
+    case EDESTADDRREQ:  return BS_NOTCONN;
+    case EALREADY:      return BS_AGAIN;
+    case EINPROGRESS:   return BS_AGAIN;
 #ifdef ENOTCAPABLE
     /* FreeBSD only, and it arrives from a capability restricted descriptor.
      * Mapped here rather than left to fall through to IO because M8 turns

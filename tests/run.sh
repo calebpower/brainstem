@@ -445,6 +445,33 @@ run "the preopen table describes the directory it was given" sh -c '
     ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
         | grep -q "0100000002043f000000000004776f726b"'
 
+
+# The five net ops, in one conversation, with no second process involved.
+# bind replies with the address actually bound, the program reads the
+# ephemeral port out of that reply in raw brainfuck, and emits it back in the
+# connect frame -- so the fixture needs no fixed port, no helper binary and
+# no coordination outside the protocol.
+run "a brainfuck program connects to itself over TCP" sh -c '
+    ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/loopback.bf >/dev/null 2>&1'
+run "the two bytes arrive through the socket" sh -c '
+    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=2 6869$"'
+# THE CHECK THAT MATTERS. bind was asked for port 0 and had to answer with a
+# real one, and the program had to carry those two bytes from a reply into a
+# request. If the port in the connect frame did not match the port bind
+# returned, the fixture would still connect to SOMETHING or fail -- so this
+# compares them rather than trusting that it worked.
+run "the port the program connects to is the port bind gave it" sh -c '
+    out=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf 2>&1 >/dev/null)
+    bound=$(printf "%s\n" "$out" | sed -n "s/^brainstem: < 00 len=32 ....\(....\).*/\1/p")
+    used=$(printf "%s\n" "$out"  | sed -n "s/^brainstem: > 06 len=38 ................\(....\).*/\1/p")
+    if [ -z "$bound" ] || [ "$bound" = "0000" ]; then echo "bind did not report a port: [$bound]"; exit 1; fi
+    if [ "$bound" != "$used" ]; then echo "bind gave $bound, connect used $used"; exit 1; fi
+    exit 0'
+run "accept reports a handle and a 32 byte peer address" sh -c '
+    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=36 03000000"'
+
 # TIER 6
 echo
 echo "== tier 6: error paths =="
@@ -511,6 +538,34 @@ run "a path with .. in it is refused" sh -c '
     got=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf 2>&1 >/dev/null \
           | awk "/^brainstem: > 11 /{f=1;next} f&&/^brainstem: < /{print;exit}")
     test "$got" = "brainstem: < 04 len=0"'
+
+
+# The socket refusals, in order. Two are worth naming. Family 3 Unix is
+# NOTSUP rather than INVAL because it is DECLARED by the ABI and not built by
+# this broker, which is a different answer from "no such family" -- the first
+# version collapsed the two and would have sent someone looking at their own
+# encoder. And connect on a listener is ISCONN from the handle's kind rather
+# than DENIED from its rights, because listen() strips CONNECT and a
+# rights-first check would blame the capability when the handle was wrong.
+run "every socket refusal lands on its own status, in order" sh -c '
+    got=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/refused.bf 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < \(..\) .*/\1/p" | tr "\n" " ")
+    want="00 06 17 06 06 00 20 03 00 00 00 26 04 00 00 "
+    if [ "$got" != "$want" ]; then
+        echo "wanted: $want"
+        echo "got:    $got"
+        exit 1
+    fi
+    exit 0'
+# ECONNREFUSED is 61 on FreeBSD and 111 on Linux. This is the case that found
+# the net errnos missing from sys_errmap entirely -- they arrived on the wire
+# as IO, which is the "errno that escaped the map" that CONVENTIONS names as
+# the reason the platform parity tier exists.
+run "a refused connection is CONNREFUSED and not a raw errno" sh -c '
+    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/refused.bf 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 20 len=0$"'
+run "and the program survives all of them and exits cleanly" sh -c '
+    ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/refused.bf >/dev/null 2>&1'
 
 # TIER 7
 echo

@@ -105,6 +105,31 @@ sys_linux errno
 sys_linux syscall
 sys_freebsd arc4random_buf
 
+# ---- sys_net.c: the socket half of the seam ----
+#
+# This is the whole of brainstem's network reach. There is no name resolution
+# on it and there never will be: getaddrinfo dlopens NSS, defeats static
+# linking, and would be the sole exemption in both audit tiers -- so connect
+# takes a literal address and this list has no resolver in it.
+sys_net errno
+sys_net socket
+sys_net connect
+sys_net bind
+sys_net listen
+sys_net accept
+sys_net getsockname
+sys_net getsockopt
+sys_net setsockopt
+sys_net poll
+sys_net fcntl
+sys_net close
+# htons and ntohs are macros or compiler builtins on both platforms today, so
+# neither leaves a symbol -- but nothing in either standard requires that, and
+# a libc that made them real functions would be within its rights. Optional,
+# for the same reason the printf lowerings are.
+sys_net htons ?
+sys_net ntohs ?
+
 # ---- compiler lowerings, marked optional with a trailing "?" ----
 #
 # These are not dependencies this program asked for. A C compiler is free to
