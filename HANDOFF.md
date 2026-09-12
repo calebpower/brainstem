@@ -231,6 +231,30 @@ for.
 
 ## Traps that have actually bitten
 
+- **A gate you cannot log in to has to carry its own diagnosis.** M3 came back
+  from `freebsd-15.1` with two failing tiers, 10a and 10b. Both of them had
+  computed the exact answer -- the expected multiset beside the observed one,
+  the offending symbol beside the allowlist -- and `tests/run.sh` had thrown it
+  all away, because `run()` redirected both streams to `/dev/null` and printed
+  the word FAIL.
+
+  reaper's guests are ephemeral. There is no machine left to ask, and the
+  development host is a Windows box that cannot reach the primary platform at
+  all, so the cost of a discarded diagnosis is a full round trip through
+  somebody else's afternoon. `run()` now prints the output of anything that
+  fails, indented; success is still silent, because 132 passing checks that
+  each print a paragraph is a log nobody reads.
+
+  Two checks had to change shape to have anything to say. The five parity
+  comparisons were `cmp -s`, which is silent BY DESIGN, and are now `diff -u`
+  against a file in `$BS_TMP`. `bsaudit.sh` now dumps the whole measured
+  external surface whenever any rule fails, rather than naming one symbol --
+  when a toolchain surprises you, the shape of its entire output is the thing
+  worth seeing, not the first row that tripped.
+
+  **Write the diagnosis into the tool, not the postmortem.** Anything that runs
+  only on the guest should assume its author will never see the machine.
+
 - **A syscall tier cannot see a syscall that libc does not make.** The plan for
   tier 10a said "one fixture per op under `ktrace` or `strace`, diff the
   observed multiset". Run it on `clock_now` and the multiset is EMPTY on Linux:

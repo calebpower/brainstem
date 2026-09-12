@@ -77,3 +77,35 @@ sys_posix clock_gettime
 sys_linux errno
 sys_linux syscall
 sys_freebsd arc4random_buf
+
+# ---- compiler lowerings, marked optional with a trailing "?" ----
+#
+# These are not dependencies this program asked for. A C compiler is free to
+# rewrite a call whose format string has no conversions: clang turns
+# printf("done") into puts and fprintf(stderr, "done") into fwrite, while gcc
+# under _FORTIFY_SOURCE turns the same calls into __printf_chk and
+# __fprintf_chk and lowers neither. Which set appears is a property of the
+# toolchain, so pinning either would make the audit fail on the platform that
+# chose the other -- the exact shape of defect this project has hit four times
+# now.
+#
+# "?" means permitted, not required. The forward rule is unchanged: a symbol
+# still has to be on this list to be allowed at all, so a genuine fwrite in a
+# unit that has no business writing anything is still a finding. Only the
+# "nothing references this" rule skips them, because on half the toolchains
+# nothing will.
+#
+# Every one of these is a lowering of a call already listed above for the same
+# unit. A lowering of something NOT already listed would be a real dependency
+# wearing a disguise, and does not belong here.
+main puts ?
+main fputs ?
+main fwrite ?
+main stdout ?
+broker puts ?
+broker fputs ?
+broker fwrite ?
+child fputs ?
+child fwrite ?
+ops fputs ?
+ops fwrite ?

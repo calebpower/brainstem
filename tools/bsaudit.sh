@@ -71,6 +71,9 @@ normalise() {
     awk '{
         s = $0
         if (s == "__errno_location" || s == "__error" || s == "__errno") s = "errno"
+        if (s == "__stderrp") s = "stderr"
+        if (s == "__stdoutp") s = "stdout"
+        if (s == "__stdinp")  s = "stdin"
         sub(/^__isoc99_/, "", s)
         sub(/_chk$/, "", s)
         sub(/^__sysv_/, "", s)
@@ -129,7 +132,14 @@ audit() {
     awk 'NR == FNR { g[$1] = 1; next } !($2 in g) { print }' \
         "$tmp/ignore" "$tmp/ext.raw" > "$tmp/ext"
 
-    grep -v '^[[:space:]]*#' "$allow" | grep . | sort -u > "$tmp/allow"
+    # Two readings of the allowlist. A row ending in "?" is OPTIONAL: the
+    # symbol is permitted but not required, because whether it appears is the
+    # compiler's choice rather than the program's -- clang lowers a
+    # literal-only printf to puts and a literal-only fprintf to fwrite,
+    # and gcc under _FORTIFY_SOURCE does neither. Both readings accept an
+    # optional row; only the required reading complains when nothing uses one.
+    grep -v '^[[:space:]]*#' "$allow" | grep . | awk 'NF >= 2 { print $1, $2 }' | sort -u > "$tmp/allow"
+    grep -v '^[[:space:]]*#' "$allow" | grep . | awk 'NF >= 2 && $3 != "?" { print $1, $2 }' | sort -u > "$tmp/allow.req"
 
     # R1, both directions. An allowlist entry nobody needs is how a list
     # stops describing anything -- it is the same rot as a stale tier table,
@@ -145,7 +155,7 @@ audit() {
     while read -r u s; do
         grep -qx "$u" "$tmp/units" || continue
         grep -qx "$u $s" "$tmp/ext" || say_fail "R1 the allowlist has '$u $s', which $u does not reference"
-    done < "$tmp/allow"
+    done < "$tmp/allow.req"
 
     # R2 -- no allocation, anywhere, allowlisted or not
     got=$(awk '{ print $2 }' "$tmp/ext" | grep -xE 'malloc|calloc|realloc|free|strdup|strndup|asprintf|vasprintf|mmap' | sort -u || true)
@@ -183,6 +193,16 @@ audit() {
         say_fail "R7 $n platform objects are linked: $(echo $seams)"
     elif [ -n "$want_seam" ] && [ "$seams" != "$want_seam" ]; then
         say_fail "R7 the linked seam is $seams but build.sh chose $want_seam"
+    fi
+
+    # A failure here is usually read on a guest nobody can log in to, so the
+    # whole measurement goes out with it rather than just the verdict. Without
+    # this, "R1 broker references fwrite" tells you one symbol when what you
+    # need is the shape of the toolchain's whole output.
+    if [ "$fail" != 0 ]; then
+        echo "bsaudit: the external surface as measured, unit by unit:"
+        sed 's/^/bsaudit:   /' "$tmp/ext"
+        echo "bsaudit: (symbols already undecorated; see normalise() for the rules)"
     fi
 
     rm -rf "$tmp"
@@ -240,6 +260,12 @@ EOT
 
     base; echo "ops nosuchsymbol" >> "$d/allow"
     expect 1 "R1 catches an allowlist entry nothing references"
+
+    base; echo "ops nosuchsymbol ?" >> "$d/allow"
+    expect 0 "an optional allowlist entry may go unused"
+
+    base; echo "op_time U fopen" >> "$d/listing"; echo "op_time fopen ?" >> "$d/allow"
+    expect 1 "an optional entry still does not exempt an op from R3"
 
     base; echo "broker U malloc" >> "$d/listing"; echo "broker malloc" >> "$d/allow"
     expect 1 "R2 catches an allocation even when the allowlist permits it"

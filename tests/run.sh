@@ -20,10 +20,28 @@ repo=$(CDPATH= cd -- "$here/.." && pwd)
 cd "$repo"
 
 pass=0; fail=0
+bs_out=${TMPDIR:-/tmp}/bs-run-output.$$
+trap 'rm -f "$bs_out"' EXIT
+
+# ON FAILURE, SAY WHAT THE CHECK SAID.
+#
+# The first version of this threw the output away in both directions, and the
+# first time it mattered it cost a round trip to a machine this host cannot
+# reach: two tiers failed on freebsd-15.1, both of them had printed the exact
+# expected-against-observed diff that would have identified the cause, and the
+# suite discarded it and reported two lines of "FAIL".
+#
+# A gate that runs somewhere you cannot log in has to carry its own
+# diagnosis. Output is still hidden on success, because 132 passing checks
+# that each print a paragraph is a log nobody reads.
 run() {  # run LABEL CMD...
     label="$1"; shift
-    if "$@" >/dev/null 2>&1; then echo "PASS $label"; pass=$((pass+1))
-    else echo "FAIL $label"; fail=$((fail+1)); fi
+    if "$@" > "$bs_out" 2>&1; then
+        echo "PASS $label"; pass=$((pass+1))
+    else
+        echo "FAIL $label"; fail=$((fail+1))
+        sed 's/^/     | /' "$bs_out"
+    fi
 }
 
 echo "== build =="
@@ -527,21 +545,34 @@ echo "== tier 10: platform parity =="
 BS_NORM='s/^\(brainstem: < 00 len=48 .\{40\}\)../\1%%/'
 export BS_NORM
 
+# Somewhere to put the observed trace, so the comparison can be a diff rather
+# than a silent cmp. `cmp -s` was the first version and it told a FreeBSD run
+# nothing at all: the tier failed, printed no bytes, and the machine that
+# could have been asked was already gone.
+BS_TMP=$(mktemp -d)
+export BS_TMP
+trap 'rm -rf "$BS_TMP"; rm -f "$bs_out"' EXIT
+
 run "clock.bf under a frozen clock matches the pinned trace" sh -c '
     ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
-        | sed "$BS_NORM" | cmp -s - tests/trace/clock.frozen.txt'
+        | sed "$BS_NORM" > "$BS_TMP/obs"
+    diff -u tests/trace/clock.frozen.txt "$BS_TMP/obs"'
 run "clock.bf under a virtual clock matches the pinned trace" sh -c '
     ./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
-        | sed "$BS_NORM" | cmp -s - tests/trace/clock.virtual.txt'
+        | sed "$BS_NORM" > "$BS_TMP/obs"
+    diff -u tests/trace/clock.virtual.txt "$BS_TMP/obs"'
 run "badclock.bf matches the pinned trace" sh -c '
     ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/badclock.bf 2>&1 >/dev/null \
-        | sed "$BS_NORM" | cmp -s - tests/trace/badclock.frozen.txt'
+        | sed "$BS_NORM" > "$BS_TMP/obs"
+    diff -u tests/trace/badclock.frozen.txt "$BS_TMP/obs"'
 run "bytes.bf under a seed matches the pinned trace" sh -c '
     ./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null \
-        | sed "$BS_NORM" | cmp -s - tests/trace/rand.seeded.txt'
+        | sed "$BS_NORM" > "$BS_TMP/obs"
+    diff -u tests/trace/rand.seeded.txt "$BS_TMP/obs"'
 run "hello.bf matches the pinned trace" sh -c '
     ./build/brainstem --trace --clock frozen=0 --seed 00000000000000000000000000000000 -- ./build/bfi bf/ctl/hello.bf 2>&1 >/dev/null \
-        | sed "$BS_NORM" | cmp -s - tests/trace/ctl.hello.txt'
+        | sed "$BS_NORM" > "$BS_TMP/obs"
+    diff -u tests/trace/ctl.hello.txt "$BS_TMP/obs"'
 
 # The one byte the traces above hide, checked here on its own -- and checked
 # against a mapping written HERE rather than read out of the broker, so that
@@ -563,7 +594,11 @@ run "the platform byte is the one this kernel should report" sh -c '
 # above would notice.
 run "the pinned traces are not vacuous" sh -c '
     ./build/brainstem --trace --clock frozen=1700000001 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
-        | sed "$BS_NORM" | cmp -s - tests/trace/clock.frozen.txt && exit 1
+        | sed "$BS_NORM" > "$BS_TMP/obs"
+    if cmp -s "$BS_TMP/obs" tests/trace/clock.frozen.txt; then
+        echo "a different epoch produced an identical trace: the mask eats too much"
+        exit 1
+    fi
     exit 0'
 
 # TIER 10a
