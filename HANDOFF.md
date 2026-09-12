@@ -360,6 +360,27 @@ for.
 
 ## Traps that have actually bitten
 
+- **A read returns UP TO n bytes, and two fixtures assumed exactly n.**
+  `bf/proc/drive.poke` asked for eight bytes of the child's output and read a
+  reply sized for two. The child is an interpreter with unbuffered output, so
+  it emits `h` and `i` as two separate one byte writes; whether both are in
+  the pipe when the read happens is a scheduling question. If only one is,
+  the reply is a byte shorter than the fixture reads and the conversation
+  desyncs -- which presents as a hang, not as a wrong answer.
+
+  Both that fixture and `bf/net/loopback.poke` now read ONE BYTE AT A TIME. A
+  read of one blocks until there is a byte and then returns exactly it, which
+  is the only size a stream read is deterministic at. A program that wants a
+  known number of bytes from a stream has to loop, and the fixtures now show
+  the loop instead of getting away without one.
+
+  **This was never reproduced.** Forty runs of the old shape under CPU
+  contention got both bytes forty times, on the development host. It is a
+  latent defect found by reading rather than by failing, and it is recorded
+  here because the NEXT one of these will present the same way: an
+  intermittent hang in a fixture that has always worked. Any fixture reading
+  from a pipe or a socket should be read with this in mind.
+
 - **A gate you cannot log in to has to carry its own diagnosis.** M3 came back
   from `freebsd-15.1` with two failing tiers, 10a and 10b. Both of them had
   computed the exact answer -- the expected multiset beside the observed one,

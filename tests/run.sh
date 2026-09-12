@@ -475,8 +475,9 @@ run "the hello table describes the three standard handles" sh -c '
 run "a brainfuck program connects to itself over TCP" sh -c '
     ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/loopback.bf >/dev/null </dev/null 2>&1'
 run "the two bytes arrive through the socket" sh -c '
-    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf </dev/null 2>&1 >/dev/null \
-        | grep -q "^brainstem: < 00 len=2 6869$"'
+    got=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf </dev/null 2>&1 >/dev/null \
+        | sed -n "s/^brainstem: < 00 len=1 \(..\)$/\1/p" | tr -d "\n")
+    test "$got" = "6869"'
 # THE CHECK THAT MATTERS. bind was asked for port 0 and had to answer with a
 # real one, and the program had to carry those two bytes from a reply into a
 # request. If the port in the connect frame did not match the port bind
@@ -517,8 +518,9 @@ run "brainfuck drives brainfuck" sh -c '
 run "the bytes come back through the child" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
-    (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
-        | grep -q "^brainstem: < 00 len=2 6869$"'
+    got=$( (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
+        | sed -n "s/^brainstem: < 00 len=1 \(..\)$/\1/p" | tr -d "\n")
+    test "$got" = "6869"'
 run "the child exits 0 and wait reports it" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"

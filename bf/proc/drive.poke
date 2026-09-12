@@ -66,14 +66,25 @@ READ 5
 #   close handle 5, so the child sees end of input and stops
 EMIT 0c 04 00 05 00 00 00
 READ 3
-#   read  op 0a, handle 6, n 8 -- the child's stdout.  Two bytes: "hi", which
-#   went out through one pipe, through a second brainfuck program, and back
-#   through another.
-EMIT 0a 08 00 06 00 00 00 08 00 00 00
-READ 5
-#   read again: the child has exited and closed its end, so this is END with
+#   read  op 0a, handle 6 -- the child's stdout -- ONE BYTE AT A TIME.
+#
+#   A read returns UP TO n bytes, never exactly n, and this fixture asked for
+#   eight and assumed two until a gate said otherwise. The child is an
+#   interpreter with unbuffered output, so it emits 'h' and 'i' as two
+#   separate one byte writes; whether both are in the pipe when the read
+#   happens is a scheduling question. On a quiet machine the answer was always
+#   two, which is the worst kind of always.
+#
+#   Asking for one byte is deterministic: a read of one blocks until there is
+#   a byte and then returns exactly it. A program that wants a known number of
+#   bytes from a STREAM has to loop, and this is what the loop looks like.
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+#   a third read: the child has exited and closed its end, so this is END with
 #   an empty payload
-EMIT 0a 08 00 06 00 00 00 08 00 00 00
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
 READ 3
 #   wait  op 10, handle 8, flags 0 -- blocking.  state 1 exited, code 0.
 EMIT 10 06 00 08 00 00 00 00 00

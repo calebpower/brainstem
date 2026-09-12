@@ -68,10 +68,14 @@ READ 39
 #   write  op 0b, handle 5 (the client end), flags 0, "hi"
 EMIT 0b 08 00 05 00 00 00 00 00 68 69
 READ 5
-#   read  op 0a, handle 6 (the accepted end), n 8, flags 0.  Two bytes come
-#   back, and they came through a real TCP socket.
-EMIT 0a 08 00 06 00 00 00 08 00 00 00
-READ 5
+#   read  op 0a, handle 6 (the accepted end), ONE BYTE AT A TIME.  A read
+#   returns UP TO n bytes and a stream may deliver them in any grouping it
+#   likes, so asking for two and assuming two is a race waiting for a busier
+#   machine.  See drive.poke, where exactly that happened.
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
 #   close all three, youngest first
 EMIT 0c 04 00 06 00 00 00
 READ 3
