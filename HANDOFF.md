@@ -768,8 +768,8 @@ built.
    M8 was deleted rather than built; the section below says why, and
    `CONVENTIONS.md` carries the short version beside the milestone table.
 
-2. **THE SEAM WITH bfsodium, WHICH NOTHING TESTS.** Not scheduled, and the
-   largest real gap either project has.
+2. **THE SEAM WITH bfsodium, WHICH NOTHING TESTS -- AND IS NOT OURS TO
+   CLOSE.** Not scheduled here, and the largest real gap either project has.
 
    `bf/proc/drive.poke` proves a brainfuck program can drive a brainfuck
    program: two pipes, a spawn, two bytes in, two bytes out. The inner program
@@ -788,20 +788,35 @@ built.
    library's claim is that its primitives compose and bfsodium's composition
    is currently source-level pasting through `bfexpand`.
 
-   **The work probably belongs HERE and not there.** bfsodium's rulebook says
-   it is pure computation with no syscalls and no P1 broker -- the boundary
-   declaration the phase vocabulary was recovered from -- so a tier there that
-   runs this broker contradicts it. A tier here that vendors one bfsodium
-   routine as a fixture does not, and this repository already vendors
-   `tools/bfi.c` with its deltas recorded, so the pattern and its soft spot
-   are both established.
+   **THE WORK DOES NOT BELONG HERE, and an earlier version of this item said
+   it did.** The argument for putting it here was that bfsodium's rulebook
+   calls it pure computation with no syscalls and no P1 broker, so a tier
+   there that runs this broker would contradict its own boundary. True, and
+   beside the point: the fix proposed was to vendor a bfsodium routine into
+   this repository's fixtures, which contradicts OURS. brainstem's README says
+   the indirection through an external interpreter is what makes the broker
+   indifferent to what is on the far end. A crypto routine in `bf/` would make
+   this corpus domain-specific for the first time, and the next brainfuck
+   library that wants chaining has nothing to do with cryptography.
 
-   Two constraints before anyone starts. The primitive must be chosen on
-   MEASURED cost -- bfsodium's AEAD is 11.58 billion interpreter instructions
-   and is not gateable, `blockloop` is 686 million at about 1.4 seconds, and
-   SHA-256 is not in their cost table at all. And it is one piece of work with
-   the BoneMesh corpus check rather than two, since that check is nine
-   sequenced calls and this is its first two.
+   **The principle is dependency direction.** Infrastructure must not know its
+   consumers. A consumer knowing its infrastructure is ordinary. So the
+   chaining proof is a `programs/` directory in bfsodium, their HANDOFF has
+   the full reasoning and the routine-versus-program line that goes with it,
+   and their `tools/guest-setup.sh` now pins THIS repository by commit.
+
+   **What that leaves us owning is what we already claim**: that a brainfuck
+   program can drive a brainfuck program, which `bf/proc/drive.poke` proves.
+   Nothing here needs to change, and the reason this item survives at all is
+   that "nothing to do" is a conclusion somebody should be able to read rather
+   than re-derive.
+
+   **The pin points at us, which is the part to notice.** When brainstem is
+   tagged, that pin changes from a SHA to the tag, and bfsodium treats the
+   change as its own signal to approach v1.0.0 -- on the grounds that a
+   library depending on an untagged commit of its infrastructure is not one
+   anybody should depend on either. So tagging here is not a private
+   decision any more; something downstream is watching for it.
 
 3. **Smaller things, none of them blocking.**
    - `bf/net/loopback.bf` and `bf/proc/drive.bf` have no pinned trace, because
