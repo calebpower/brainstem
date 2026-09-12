@@ -1,0 +1,24 @@
+# clock.poke -- ask for both clocks, then leave.
+#
+# The first fixture that crosses the platform seam. Under --clock frozen or
+# --clock virtual its trace is a fixed string of bytes, which is what makes
+# it the fixture the determinism and platform parity tiers are pinned on:
+# the reply to a clock is otherwise the one thing in this protocol that
+# cannot be the same twice.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.3 and 7.2.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   clock_now  op 03, len 1, clock id 0 = realtime
+EMIT 03 01 00 00
+#   reply is status{1} len{2} sec{8} nsec{4}: fifteen bytes
+READ 15
+#   clock_now  op 03, len 1, clock id 1 = monotonic, which is zero at broker
+#   start rather than time since boot -- see sys.h
+EMIT 03 01 00 01
+READ 15
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

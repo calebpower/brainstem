@@ -103,11 +103,20 @@ types and brainstem's own records.
 That one rule does three jobs. It keeps the wire identical across platforms,
 because an op cannot leak a platform value into a frame when the seam never
 hands it one. It confines the extension surface: only `sys_freebsd.c` and
-`sys_linux.c` may be compiled with a namespace-widening macro, and only those
-files may read `errno`. And it makes a future `sys_win32.c` an implementation
-rather than a refactor.
+`sys_linux.c` may be compiled with a namespace-widening macro. And it makes a
+future `sys_win32.c` an implementation rather than a refactor.
 
 Every seam function returns a `bs_err`, never −1.
+
+**`errno` is not confined to the seam, and saying it was would have been the
+comfortable lie.** `broker.c` reads it to retry an interrupted pipe read and
+`main.c` reads it in the interpreter probe; neither owns any ABI surface, and
+pretending otherwise would have meant either a rule that is false or a wrapper
+that exists to satisfy a sentence. What is actually enforced, by
+`tools/bsaudit.sh` against the objects, is the rule with teeth: **no `op_*`
+unit may read `errno`, and `sys_errmap` may be called only from `src/sys_*.c`.**
+An errno therefore cannot become a status anywhere except at the seam, which
+is the property the confinement was ever for.
 
 FreeBSD is the primary platform and Linux is second. That order is a statement
 about which failure is more serious, not about which runs first.
@@ -279,7 +288,7 @@ Milestones, each ending in a committable unit green on **both** guests.
 | **M0** | the two lanes, the documents, the vendored interpreter. No broker. |
 | **M1** | the frame codec, alone — no process, no descriptor, no platform. |
 | **M2** | a standard brainfuck program completes a round trip. Three `ctl` ops, which do not cross the seam, so deadlock and timeout are settled at zero platform cost **before twenty more ops inherit them**. |
-| **M3** | the seam, and the deterministic ops. Parity and syscall tiers light up. |
+| **M3** | **done.** The seam, `clock_now` and `random_bytes`, `--seed` and `--clock`, and the two measured tiers. Four of twenty three. |
 | **M4** | handles, io and fs. |
 | **M5** | net. |
 | **M6** | proc. 23 of 23. |

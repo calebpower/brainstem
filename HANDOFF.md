@@ -6,33 +6,74 @@ is actually built and where it has already bitten.
 
 ## State
 
-**Milestone M2 — the thesis holds.** A file containing nothing but the eight
-brainfuck instructions, run under a general purpose interpreter, reaches an
-operating system and comes back.
+**Milestone M3 — the seam is in, and it is measured.** A file containing
+nothing but the eight brainfuck instructions, run under a general purpose
+interpreter, reaches an operating system, reads a clock, asks the kernel for
+randomness, and comes back.
 
     > 01 len=10     hello
     < 00 len=48     OK, the 48 byte record
+    > 04 len=2      random_bytes, n = 16
+    < 00 len=16     82233aa0ca0a14573efd34e9a85da697
     > 02 len=1      exit 0
     < 00 len=0      OK
 
-**Gated: 94 pass, 0 fail on `freebsd-15.1` and 94 pass, 0 fail on
-`ubuntu-26.04`.** M0 was 22 on both.
+**Gated on Linux: 132 pass, 0 fail in the container lane.** M2 was 94 on both
+guests, M0 was 22. THE FREEBSD HALF OF M3 HAS NOT RUN YET — see *The one thing
+M3 is guessing about*, below, which names the single file most likely to be
+wrong and says what to do about it.
 
-Getting there cost three portability defects and they are recorded under
-*Traps* below, because all three had the same shape and the next one will
-too.
+Four of the twenty three ops are built: `ctl.hello`, `ctl.exit`,
+`time.clock_now` and `rand.random_bytes`. The other nineteen are declared in
+`src/ops.def` with a NULL handler and answer NOSUCHOP, which is recoverable —
+the payload is consumed and the stream stays in step, because that is the
+forward compatibility path for a program written against a later minor
+version.
 
-Two of the twenty three ops are built: `ctl.hello` and `ctl.exit`. The other
-twenty one are declared in `src/ops.def` with a NULL handler and answer
-NOSUCHOP, which is recoverable — the payload is consumed and the stream stays
-in step, because that is the forward compatibility path for a program written
-against a later minor version.
+`ctl` was chosen for M2 precisely because it does not cross the platform seam,
+and time and rand were chosen for M3 for the opposite reason: `arc4random_buf`
+against `getrandom` is a genuine divergence, so `src/sys.h` took its shape
+from one rather than from a hypothesis about what might diverge later.
 
-`ctl` was chosen for M2 precisely because it does not cross the platform
-seam. The pipe topology, the half duplex discipline, the deadlock proof and
-the buffering diagnosis are all settled now, once, with no platform surface
-to confuse the result — and twenty one more ops will inherit a channel that
-has already been proved.
+### What M3 actually added, and why each piece is where it is
+
+- **`src/sys.h`, the seam.** No POSIX type appears in it. That one rule is
+  what keeps the wire identical across platforms and what will make a
+  `sys_win32.c` an implementation rather than a refactor.
+- **`src/det.c`, the determinism knobs**, read by exactly two ops. The
+  generator is ChaCha20 with a stated construction rather than a seeded
+  `arc4random`, because the bytes must be identical on both guests — and
+  because bfsodium implements ChaCha20 in brainfuck and verifies it against
+  RFC 8439, which makes the sibling an independent oracle for this broker's
+  RNG. `--selftest` checks it against the published zero-key vector and two
+  more computed outside this program.
+- **`--trace` now prints payloads.** That is what turns a trace into an
+  artifact a test can pin, and tiers 7 and 10 are both built on it. Lengths
+  alone could not have carried either.
+- **`tools/bsaudit.sh` and `tools/bscalls.sh`**, the two measured tiers. Read
+  the header of each; between them they buy what the abandoned syscall-lean
+  design was going to buy, on the platform where hand-written wrappers could
+  never have gone.
+- **`tests/trace/` and `tests/syscalls/`**, the pinned expectations. Both are
+  committed rather than observed at run time, which is the whole difference
+  between a parity tier and a tier that passes on two machines that disagree.
+
+### The one thing M3 is guessing about
+
+`tests/syscalls/freebsd/rand.live.txt` says one `getrandom`. **That line was
+written from what FreeBSD documents, not from a run**, and it is the only
+unmeasured expectation in the tree. `arc4random_buf` seeds a per-thread ChaCha
+state from the kernel on first use; if this FreeBSD serves that from a shared
+page instead, the file should be empty and the gate will say so — tier 10a
+prints the observed multiset next to the expected one, so the fix is that one
+line. The other four FreeBSD files are empty and are certain: none of those
+paths reaches the kernel on any platform, and `rand.seeded` being empty is a
+property of `det.c` rather than of FreeBSD.
+
+Everything else about the FreeBSD half is the same shape of blind write that
+M0 and M2 survived. `nm` output parsing in `bsaudit.sh` was written against
+both GNU and elftoolchain conventions deliberately, and `bscalls.sh` parses
+`kdump` and `strace` in one script for the same reason.
 
 That ordering was deliberate — the first commit has to be green on the machine
 of record, and you cannot claim that without the lane that runs it. It also
@@ -76,22 +117,22 @@ marker in the suite at all.
 
 | tier | built | run.sh lines | what it is |
 |---|---|---|---|
-| 0 | yes | 5 | checker self-tests |
+| 0 | yes | 7 | checker self-tests |
 | 1 | yes | 17 | interpreter self-test, all three EOF modes |
 | 2 | yes | 1 | the program is still brainfuck |
 | 3 | yes | 1 | fixture regeneration |
 | 3a | yes | 2 | fixture legibility, and the expander knows no ABI |
 | 3b | no | 0 | the header does not lie — needs bsframe --decode wiring |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | yes | 3 | per-op round trip |
-| 6 | yes | 7 | error paths |
-| 7 | no | 0 | determinism and replay — needs the clock and rng ops |
+| 5 | yes | 6 | per-op round trip |
+| 6 | yes | 9 | error paths |
+| 7 | yes | 12 | determinism: seed, frozen and virtual clock, both polarities |
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
-| 10 | no | 0 | platform parity — needs the seam, M3 |
-| 10a | no | 0 | per-op syscall surface — needs the seam, M3 |
-| 10b | no | 0 | the seam is narrow — needs the seam, M3 |
-| 10c | yes | 6 | the tables and the lane definitions agree |
+| 10 | yes | 7 | platform parity, against traces pinned in tests/trace/ |
+| 10a | yes | 1 | per-op syscall surface — FreeBSD side pinned but unmeasured |
+| 10b | yes | 1 | the seam is narrow, measured from the objects |
+| 10c | yes | 10 | the tables and the lane definitions agree |
 | 11 | manual | 0 | mutation, a discipline rather than a check |
 | 12 | no | 0 | purity audit, M8 |
 
@@ -190,6 +231,36 @@ for.
 
 ## Traps that have actually bitten
 
+- **A syscall tier cannot see a syscall that libc does not make.** The plan for
+  tier 10a said "one fixture per op under `ktrace` or `strace`, diff the
+  observed multiset". Run it on `clock_now` and the multiset is EMPTY on Linux:
+  glibc serves `clock_gettime` from the vDSO, so no syscall is issued and no
+  tracer can see one. FreeBSD does the same thing through its timekeeping page.
+
+  This is not a defect and it is not fixable — it is what the platform does —
+  but it quietly removes a claim the tier looked like it was making. So the
+  tier makes the claim it can actually support: what is pinned is the op
+  specific part of the multiset, and for most fixtures that is empty. The
+  measurement that survives is the one that mattered most anyway,
+  `rand.seeded` against `rand.live`: nothing at all versus one `getrandom`,
+  which is the seeded generator proving it never consults the kernel. If you
+  add an op and its pinned file comes back empty, check whether the call is
+  real before concluding the op does nothing.
+
+- **A normalisation nearly made the parity tier vacuous.** Tier 10 compares a
+  trace against a file in `tests/trace/`, and exactly one byte — the platform
+  byte in the hello reply — is masked to `%%` first, because it exists to
+  differ. The first version of that `sed` masked the wrong offset: it counted
+  the 48 byte record's fields wrongly and blanked a byte of `clock_step_ns`
+  instead. Every test still passed, because the wrong byte happened to be
+  constant across the fixtures.
+
+  That is the shape to fear in any tier built on normalisation: it does not
+  fail, it stops asking. The mitigation is in the suite — "the pinned traces
+  are not vacuous" runs a fixture with a deliberately different epoch and
+  requires the comparison to FAIL. Any future normalisation gets the same
+  treatment, and a mask with no such case beside it should not be believed.
+
 - **THE PATTERN, three for three: the development host and the container agree
   with each other, and the primary platform disagrees with both.** Every
   portability defect this project has had took that shape, and two of the three
@@ -206,8 +277,10 @@ for.
 
   The lesson is not "be careful with awk". It is that **a green container run
   is not evidence about FreeBSD**, and the two guest gate earns its keep at
-  precisely the moment someone is tempted to skip it. Expect the next one at
-  M3, where the seam starts and this class of defect lives by definition.
+  precisely the moment someone is tempted to skip it. M3 was predicted to produce the next one and has not yet been run on
+  FreeBSD, so that prediction is still open; the seam was written to expect
+  it, which is why `bsaudit.sh` parses two `nm` conventions and `bscalls.sh`
+  parses both `kdump` and `strace` in one file.
 
 - **An untested code path stays broken.** `bstier --fix` passed its `-v`
   options after the awk program, so awk read them as filenames. It had been
@@ -264,22 +337,29 @@ for.
 
 ## What is next
 
-1. **M1, the frame codec alone.** No process, no descriptor, no platform —
-   nothing in it can fail for a platform reason, which is exactly why it comes
-   before the seam. It also gets `bsframe`, the independently written second
-   encoder, which every later tier leans on.
-2. **M2 is the milestone that matters.** A standard brainfuck program
-   completing a round trip through a real interpreter over real pipes either
-   validates the whole idea or kills it. It uses only the three `ctl` ops,
-   which do not cross the seam, so it settles deadlock, timeout and the
-   buffering diagnosis at zero platform cost **before twenty more ops inherit
-   them**.
-3. **Then the seam, with time and rand first**, because `arc4random_buf`
-   against `getrandom` is a real divergence and the seam should take its shape
-   from one rather than from a hypothesis.
-4. The remaining op families, `proc` last because it is the hairiest: fd
-   inheritance, zombies, and `SIGCHLD` racing the broker's own reaping of the
-   interpreter.
+M0 through M3 are done. What remains:
+
+1. **M4 — handles, io and fs.** `fdtab.c` with generations, and eleven ops:
+   `read`, `write`, `close`, `seek`, `poll`, `open`, `stat`, `readdir`,
+   `unlink`, `mkdir`, `rename`. This is where tier 6 reaches full strength and
+   where `bs_stat` normalisation gets tested under tier 10. Handles are
+   `(gen << 16) | index` and never an OS fd, for a specific defect: the program
+   closes handle 3, the OS recycles fd 3, and a stale handle silently reads
+   someone else's socket.
+2. **M5 — net.** `socket`, `connect`, `bind`, `listen`, `accept`, plus
+   `tools/netecho.c` so the tier depends on no `nc` — whose flags differ
+   between the two guests, which is a divergence forty lines of C removes.
+3. **M6 — proc.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and
+   last because it is the hairiest: fd leaks, zombies, and `SIGCHLD` racing the
+   broker's own reaping of the interpreter. **This is the payoff** — a
+   brainfuck program spawning an interpreter on a second brainfuck program is
+   what makes brainfuck itself the harness that can chain bfsodium's
+   primitives.
+4. **M7 — the tiers that need all of it.** Tier 11 swept across every op;
+   metamorphic checks spanning ops. ABI.md frozen. `--replay`.
+5. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
+   `cap_enter()` on FreeBSD. Expect ABI additions, since `cap_enter()` forces
+   the preopen model onto `open`.
 
 ## Decisions worth not relitigating
 

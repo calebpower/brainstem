@@ -32,10 +32,10 @@ OP(0x01, HELLO,        op_ctl_hello,  10,     BS_VAR)
 OP(0x02, EXIT,         op_ctl_exit,    1,     0)
 
 /* ---- time -------------------------------------------------------------- */
-OP(0x03, CLOCK_NOW,    NULL,           1,     12)
+OP(0x03, CLOCK_NOW,    op_time_clock_now, 1,   12)
 
 /* ---- rand -------------------------------------------------------------- */
-OP(0x04, RANDOM_BYTES, NULL,           2,     BS_VAR)
+OP(0x04, RANDOM_BYTES, op_rand_bytes,  2,     BS_VAR)
 
 /* ---- net --------------------------------------------------------------- */
 OP(0x05, SOCKET,       NULL,           3,     4)

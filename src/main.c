@@ -11,6 +11,8 @@
  *   --interp PATH          the interpreter, if not given after --
  *   --hello-timeout MS     default 5000; 0 disables
  *   --op-timeout MS        default 30000; 0 disables
+ *   --seed HEX             32 hex characters; makes random_bytes deterministic
+ *   --clock SPEC           live | frozen[=EPOCH] | virtual[=EPOCH][,step=NS]
  *   --trace                print every frame to stderr
  *   --check-interpreter P  probe P for the one property the protocol needs
  *   --dump-abi             print the op table, for tools/bsabi
@@ -30,6 +32,8 @@
 #include "brainstem.h"
 #include "broker.h"
 #include "ops.h"
+#include "det.h"
+#include "sys.h"
 
 static void usage(const char *me) {
     fprintf(stderr,
@@ -116,6 +120,140 @@ static int check_interpreter(const char *interp) {
     return BS_EXIT_INTERP;
 }
 
+/* The determinism knobs, checked against vectors computed OUTSIDE this
+ * program.
+ *
+ * The all-zero-seed row is the published ChaCha20 test vector for a 32 byte
+ * zero key, zero nonce and counter 0 -- which is exactly what a zero seed
+ * expands to under the construction det.c documents. That is the row that
+ * proves the construction is the one ABI.md section 9 describes and not
+ * merely self-consistent: a transposed rotation or a wrong constant would
+ * still agree with itself, and would not agree with this.
+ *
+ * The other two rows were produced by an independent implementation and are
+ * here so the check has something to say about a seed that is not all zeros,
+ * where a key-loading bug would hide.
+ */
+static int det_selftest(void) {
+    static const struct { const char *seed; const char *hex; } vec[] = {
+        { "00000000000000000000000000000000",
+          "76b8e0ada0f13d90405d6ae55386bd28bdd219b8a08ded1aa836efcc8b770dc7"
+          "da41597c5157488d7724e03fb8d84a376a43b8f41518a11cc387b669b2ee6586" },
+        { "000102030405060708090a0b0c0d0e0f",
+          "82233aa0ca0a14573efd34e9a85da6974427bd504b666b21640b9bcadbb23bc6" },
+        { "deadbeefcafebabe0123456789abcdef",
+          "52c78613402d35ad798554b19998529f4f9939586efec1cd41d75ac53edb8fea"
+          "7dd149153f52ebc4" }
+    };
+    static const char *bad[] = {
+        "", "0", "0000000000000000000000000000000",      /* 31: short */
+        "000000000000000000000000000000000",             /* 33: long */
+        "0000000000000000000000000000000g",              /* not hex */
+        "0000000000000000 000000000000000"               /* a space is not hex */
+    };
+    unsigned char got[96];
+    size_t i, j, n;
+
+    for (i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        if (det_set_seed(bad[i]) == BS_OK) {
+            printf("SELFTEST FAIL: --seed accepted \"%s\"\n", bad[i]); return 1;
+        }
+    }
+    if (det_set_seed(0) == BS_OK) { printf("SELFTEST FAIL: --seed accepted nothing\n"); return 1; }
+    printf("selftest ok: a malformed seed is refused rather than padded\n");
+
+    for (i = 0; i < sizeof vec / sizeof vec[0]; i++) {
+        n = strlen(vec[i].hex) / 2;
+        if (det_set_seed(vec[i].seed) != BS_OK) {
+            printf("SELFTEST FAIL: seed %s refused\n", vec[i].seed); return 1;
+        }
+        if (!det_rng_seeded()) { printf("SELFTEST FAIL: seeded but not reported\n"); return 1; }
+        if (det_random(got, (unsigned int)n) != BS_OK) {
+            printf("SELFTEST FAIL: det_random failed\n"); return 1;
+        }
+        for (j = 0; j < n; j++) {
+            unsigned int want;
+            if (sscanf(vec[i].hex + 2 * j, "%2x", &want) != 1) return 1;
+            if (got[j] != (unsigned char)want) {
+                printf("SELFTEST FAIL: seed %s byte %u is %02x, expected %02x\n",
+                       vec[i].seed, (unsigned)j, got[j], want);
+                return 1;
+            }
+        }
+    }
+    printf("selftest ok: the seeded keystream matches three external vectors\n");
+
+    /* The knob must not be inert. A generator that ignored the seed entirely
+     * would pass none of the above -- but one that hashed the seed into a
+     * fixed state would pass the first row and fail here, and that is a real
+     * mistake somebody could make. */
+    {
+        unsigned char a[32], b[32];
+        det_set_seed("00000000000000000000000000000001");
+        det_random(a, 32);
+        det_set_seed("00000000000000000000000000000002");
+        det_random(b, 32);
+        if (memcmp(a, b, 32) == 0) {
+            printf("SELFTEST FAIL: two different seeds gave the same bytes\n"); return 1;
+        }
+        /* and re-seeding must REWIND, not continue: a replay depends on it */
+        det_set_seed("00000000000000000000000000000001");
+        det_random(b, 32);
+        if (memcmp(a, b, 32) != 0) {
+            printf("SELFTEST FAIL: the same seed did not repeat itself\n"); return 1;
+        }
+    }
+    printf("selftest ok: the seed changes the bytes, and repeats them\n");
+
+    {   /* the clock spec grammar, both polarities */
+        static const char *ok[] = { "live", "frozen", "frozen=0", "frozen=1700000000",
+                                    "virtual", "virtual=5", "virtual=5,step=1",
+                                    "virtual,step=1000000" };
+        static const char *no[] = { "", "LIVE", "fixed", "frozen=", "frozen ", "virtualx",
+                                    "virtual,", "virtual,step", "virtual,nope=1" };
+        for (i = 0; i < sizeof ok / sizeof ok[0]; i++)
+            if (det_set_clock(ok[i]) != BS_OK) {
+                printf("SELFTEST FAIL: --clock refused \"%s\"\n", ok[i]); return 1;
+            }
+        for (i = 0; i < sizeof no / sizeof no[0]; i++)
+            if (det_set_clock(no[i]) == BS_OK) {
+                printf("SELFTEST FAIL: --clock accepted \"%s\"\n", no[i]); return 1;
+            }
+        if (det_set_clock(0) == BS_OK) { printf("SELFTEST FAIL: --clock accepted nothing\n"); return 1; }
+    }
+    printf("selftest ok: the clock spec grammar accepts and refuses as written\n");
+
+    {   /* a virtual clock must advance with requests and be strictly
+         * monotonic, because "loop until the clock changes" has to terminate */
+        bs_time t0, t1;
+        det_set_clock("virtual=100,step=1000000");
+        det_clock_real(&t0);
+        det_tick();
+        det_clock_real(&t1);
+        if (!(t1.sec > t0.sec || (t1.sec == t0.sec && t1.nsec > t0.nsec))) {
+            printf("SELFTEST FAIL: the virtual clock did not advance\n"); return 1;
+        }
+        det_set_clock("frozen=100");
+        det_clock_real(&t0);
+        det_tick();
+        det_clock_real(&t1);
+        if (t0.sec != 100 || t1.sec != 100 || t0.nsec != 0 || t1.nsec != 0) {
+            printf("SELFTEST FAIL: the frozen clock moved\n"); return 1;
+        }
+        det_set_clock("live");
+    }
+    printf("selftest ok: virtual advances per request, frozen does not\n");
+
+    /* The seam reports a platform this build knows. 0 would mean the seam
+     * compiled but nobody claimed it. */
+    if (sys_platform() == 0) { printf("SELFTEST FAIL: the seam reports no platform\n"); return 1; }
+    printf("selftest ok: the seam reports platform %u\n", (unsigned)sys_platform());
+
+    if (sys_lockdown() != BS_OK) { printf("SELFTEST FAIL: lockdown failed\n"); return 1; }
+    printf("selftest ok: sys_lockdown is callable (a no-op until M8)\n");
+    return 0;
+}
+
 /* The broker's own checks: the op table must be well formed. The codec has
  * its own self test in tools/bscodec, because it can be tested without any
  * of this. */
@@ -141,6 +279,8 @@ static int selftest(void) {
         }
         printf("selftest ok: an exact arity accepts only its length\n");
     }
+    if (det_selftest() != 0) return 1;
+
     printf("brainstem --selftest: ok\n");
     return 0;
 }
@@ -168,6 +308,28 @@ int main(int argc, char **argv) {
             return check_interpreter(argv[i + 1]);
         }
         if (strcmp(a, "--trace") == 0) { o.trace = 1; continue; }
+        if (strcmp(a, "--seed") == 0) {
+            if (i + 1 >= argc) { usage(argv[0]); return BS_EXIT_USAGE; }
+            if (det_set_seed(argv[++i]) != BS_OK) {
+                fprintf(stderr,
+                    "brainstem: --seed takes exactly 32 hex characters.\n"
+                    "brainstem: a short seed is refused rather than padded, because a\n"
+                    "brainstem: silently truncated seed makes two runs differ for a\n"
+                    "brainstem: reason nothing in the output could show.\n");
+                return BS_EXIT_USAGE;
+            }
+            continue;
+        }
+        if (strcmp(a, "--clock") == 0) {
+            if (i + 1 >= argc) { usage(argv[0]); return BS_EXIT_USAGE; }
+            if (det_set_clock(argv[++i]) != BS_OK) {
+                fprintf(stderr,
+                    "brainstem: --clock takes live, frozen[=EPOCH], or\n"
+                    "brainstem: virtual[=EPOCH][,step=NS].\n");
+                return BS_EXIT_USAGE;
+            }
+            continue;
+        }
         if (strcmp(a, "--interp") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return BS_EXIT_USAGE; }
             o.interp = argv[++i]; continue;

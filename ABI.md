@@ -177,10 +177,16 @@ misbehave in a way nobody could debug.
 
 | condition | broker does |
 |---|---|
-| `magic` wrong | no reply at all; diagnose on stderr, exit 70 |
+| `magic` wrong | reply `PROTO`, payload empty; diagnose on stderr, exit 70 |
 | `want_major` ≠ 1 | reply `VERSION`, payload empty, exit 70 |
 | `want_minor` > broker's | reply `VERSION`, exit 70 |
 | otherwise | reply `OK` with the 48-byte record |
+
+A fatal status is still a REPLY. Invariant I2 -- exactly one response per
+request -- has no exceptions, including this one: a program that sent a bad
+magic is still sitting in a `,` waiting for a status byte, and leaving it
+there would turn a diagnosable error into the hang this ABI spends a whole
+section avoiding. The broker answers, then stops speaking.
 
 **Major version is never negotiated** — there is no compatible subset. Minor
 versions may differ freely; the broker echoes its own, both sides operate at
@@ -656,42 +662,81 @@ makes the preopen set an upper bound on everything the program can ever do.
 
 ## 9. Determinism
 
-brainstem introduces the two things bfsodium was built to avoid, plus three
-that are easy to miss.
+brainstem introduces the two things bfsodium was built to avoid. The sibling
+keeps every run replayable by having neither — "randomness supplied as input,
+never generated" — and a syscall broker cannot keep that rule. So it keeps the
+**property** a different way: both sources stay, and both become steerable.
 
-| flag | effect |
-|---|---|
-| `--seed HEX` / `BRAINSTEM_SEED` | seeds the RNG; `auto` draws and prints one |
-| `--clock frozen[=EPOCH]` | every `clock_now` returns the same instant |
-| `--clock virtual[=EPOCH][,step=NS]` | advances by `step` **per request**, not per wall-clock |
-| `--sort-readdir` | normalises directory order |
-| `--trace FILE` | records every frame, both directions |
-| `--replay FILE` | re-runs against the trace with **no syscalls at all** |
+| flag | state | effect |
+|---|---|---|
+| `--seed HEX` | built | 32 hex characters, 16 bytes. Makes `random_bytes` reproducible. |
+| `--clock live` | built | the default: the host's clocks |
+| `--clock frozen[=EPOCH]` | built | every `clock_now` returns the same instant |
+| `--clock virtual[=EPOCH][,step=NS]` | built | advances by `step` **per request**, not per wall-clock second |
+| `--trace` | built | prints every frame, both directions, payload in hex, to stderr |
+| `--sort-readdir` | M4 | normalises directory order |
+| `--replay FILE` | M7 | re-runs against a recorded trace with **no syscalls at all** |
 
-The seed is printed to the broker's stderr as `brainstem: seed=<hex>`, never
-into the protocol stream, and is also delivered in the hello reply. It is
-accepted back through the environment, matching the sibling's stated
-convention exactly.
+A malformed seed or clock spec is **refused, never repaired**. A seed that was
+silently truncated or an epoch silently read as zero would make two runs differ
+for a reason nothing in the output could show, which is the single failure this
+section exists to prevent.
 
-Under a seed the generator is an explicit documented construction, **not**
-seeded `arc4random`, because the bytes must be identical on both platforms.
-It is a ChaCha20 keystream, which means bfsodium's own verified ChaCha20 is an
-independent oracle for it — a dual-oracle test of the broker's RNG using the
-sibling as the second opinion.
+### 9.1 The generator is specified, not merely seeded
 
-Driving the virtual clock off the request count rather than wall time is what
-makes it deterministic, and being strictly monotonic it keeps "loop until time
-advances" terminating, which a frozen clock does not.
+Under `--seed` the generator is an explicit construction and **not** a seeded
+`arc4random`, because the bytes must be identical on both platforms. It is a
+ChaCha20 keystream, stated here exactly so that it can be reproduced
+independently:
 
-**The three that are easy to miss**, all controlled: handle numbers (broker
-assigned, dense, lowest-free-first), process handles (dense, never a pid), and
-directory order (`--sort-readdir`).
+```
+key     = the 16 seed bytes, then 16 zero bytes
+nonce   = 12 zero bytes
+counter = 0, incrementing per 64 byte block
+```
 
-**One honest leak:** under a virtual clock, a `poll` with a non-zero timeout
-still waits in real time, because real readiness cannot be virtualised. On
-expiry the broker advances the virtual clock by the requested timeout. A
-poll-heavy test is therefore not fully time-deterministic; use timeout 0 or
-infinite where strictness matters.
+The keystream is consumed sequentially across every `random_bytes` call for the
+life of the broker, so the output depends only on the seed and on how many
+bytes have been asked for so far. A call for zero bytes consumes none.
+
+This is specified rather than left to the implementation because bfsodium
+implements ChaCha20 in brainfuck and verifies it against RFC 8439 with two
+independent oracles — so the sibling library is an independent oracle for this
+broker's RNG. Nothing else available here has that property.
+
+For seed `000102030405060708090a0b0c0d0e0f`, the first sixteen bytes are
+`82233aa0ca0a14573efd34e9a85da697`; for an all-zero seed the first
+sixty-four are the published ChaCha20 test vector for a zero key, which is what
+`--selftest` checks.
+
+### 9.2 What a program can see
+
+The hello reply (§3) carries `platform`, `clock_mode`, `rng_mode`,
+`clock_step_ns` and the sixteen seed bytes, so a program can tell which world
+it is in without being told out of band. The seed is echoed rather than hidden:
+it is on the command line already, and echoing it is what lets a trace be
+replayed from the trace alone.
+
+### 9.3 Under a seed, the kernel is not consulted
+
+`random_bytes` under `--seed` issues **no syscall at all**, and under
+`--clock frozen` or `--clock virtual` neither does `clock_now`. This is pinned
+per platform in `tests/syscalls/` and diffed by tier 10a on every run, so it is
+a measurement rather than an intention.
+
+### 9.4 The three that are easy to miss
+
+Handle numbers are broker-assigned, dense and lowest-free-first; process
+handles are dense and never a pid; directory order is normalised by
+`--sort-readdir`. All three arrive with the ops that need them.
+
+### 9.5 One honest leak
+
+Under a virtual clock, a `poll` with a non-zero timeout still waits in real
+time, because real readiness cannot be virtualised. On expiry the broker
+advances the virtual clock by the requested timeout. A poll-heavy program is
+therefore not fully time-deterministic; use timeout 0 or infinite where
+strictness matters.
 
 ---
 

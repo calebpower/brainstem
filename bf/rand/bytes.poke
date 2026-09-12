@@ -1,0 +1,29 @@
+# bytes.poke -- sixteen random bytes, then none at all.
+#
+# Under --seed this is the fixture the determinism tier is pinned on, and
+# the bytes it receives are a ChaCha20 keystream the sibling library can
+# compute in brainfuck -- which is why ABI.md section 9 specifies the
+# construction rather than saying "some PRNG".
+#
+# The second request asks for ZERO bytes. That is legal and returns an empty
+# OK: a program computing a length that happens to come out zero should not
+# have to special case it, and the frame carries its own length so an empty
+# reply is unambiguous. It also must not consume any keystream, which the
+# pinned trace is what proves.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.4 and 7.2.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   random_bytes  op 04, len 2, n = 0x0010 = 16, little endian
+EMIT 04 02 00 10 00
+#   reply is status{1} len{2} then sixteen bytes: nineteen
+READ 19
+#   random_bytes  op 04, len 2, n = 0
+EMIT 04 02 00 00 00
+#   status 00, len 0, and nothing after it
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

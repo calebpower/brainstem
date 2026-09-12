@@ -32,6 +32,8 @@
 #include "broker.h"
 #include "child.h"
 #include "ops.h"
+#include "sys.h"
+#include "det.h"
 
 /* Two fixed buffers and no allocation on the ABI path, per CONVENTIONS
  * section 5. A frame is at most three bytes of header and a u16 of payload,
@@ -119,10 +121,31 @@ static bs_err write_frame(int fd, unsigned char kind, const unsigned char *body,
     return write_exact(fd, body, len);
 }
 
-static void trace(const struct bs_opts *o, const char *dir,
-                  unsigned char kind, unsigned int len) {
+/* One line per frame: direction, opcode or status, length, and THE PAYLOAD
+ * IN HEX.
+ *
+ * The payload is what makes the trace an artifact a test can pin rather than
+ * a debugging aid. Tier 7 asserts two runs under the same seed produce the
+ * same trace and two runs under different seeds do not; tier 10 asserts the
+ * trace matches a file committed to this repository rather than whatever
+ * this machine happened to produce. Neither is possible from lengths alone.
+ *
+ * It is NOT truncated, and a 65535 byte payload really does print as 131072
+ * characters. A trace that silently elided the interesting part would be
+ * worse than no trace, and --trace is opt-in: nothing prints it by accident.
+ * For the same reason, note that a trace of a real program contains whatever
+ * that program read and wrote -- it is a debugging tool, not an audit log,
+ * and it should be treated as carrying the data it names. */
+static void trace(const struct bs_opts *o, const char *dir, unsigned char kind,
+                  const unsigned char *body, unsigned int len) {
+    unsigned int i;
     if (!o->trace) return;
-    fprintf(stderr, "brainstem: %s %02x len=%u\n", dir, kind, len);
+    fprintf(stderr, "brainstem: %s %02x len=%u", dir, kind, len);
+    if (len) {
+        fputc(' ', stderr);
+        for (i = 0; i < len; i++) fprintf(stderr, "%02x", body[i]);
+    }
+    fputc('\n', stderr);
 }
 
 /* ---- the loop ---------------------------------------------------------- */
@@ -140,7 +163,24 @@ int bs_broker_run(const struct bs_opts *o) {
     ctx.exiting    = 0;
     ctx.exit_code  = 0;
 
+    /* The monotonic clock is normalised to zero here, before the child
+     * exists, so "time since the broker started" means the same thing in
+     * every run rather than encoding how long this machine has been up. */
+    sys_clock_init();
+
     if (bs_child_start(&ch, o->interp, o->prog) != BS_OK) return BS_EXIT_INTERP;
+
+    /* Privilege is dropped HERE: after the child exists and before the first
+     * frame is read, so the filter measures the steady state ABI path by
+     * construction and libc's own startup is out of scope without anyone
+     * having to account for it. A no-op in v1 with its signature frozen, so
+     * M8 is an implementation rather than a refactor -- see sys.h. */
+    if (sys_lockdown() != BS_OK) {
+        fprintf(stderr, "brainstem: could not drop privilege\n");
+        bs_child_kill(&ch);
+        return BS_EXIT_INTERP;
+    }
+
 
     for (;;) {
         unsigned char kind;
@@ -176,7 +216,16 @@ int bs_broker_run(const struct bs_opts *o) {
             return BS_EXIT_PROTO;
         }
         first = 0;
-        trace(o, ">", kind, len);
+        trace(o, ">", kind, in_arena, len);
+
+        /* ONE TICK PER REQUEST, not per clock_now, and counted here rather
+         * than in the handler so that every op advances the virtual clock.
+         * A program's request sequence is a property of the program alone,
+         * which is what makes the virtual clock deterministic; tying it to
+         * clock_now instead would make the clock depend on how often it was
+         * read, which is the one thing a clock must not do. */
+        det_tick();
+
 
         {
             const struct bs_op *op = bs_op_lookup(kind);
@@ -208,7 +257,7 @@ int bs_broker_run(const struct bs_opts *o) {
              * both zero, and is done. */
             if (st != BS_OK) bs_buf_init(&rep, out_arena, sizeof out_arena);
 
-            trace(o, "<", (unsigned char)st, (unsigned int)bs_buf_len(&rep));
+            trace(o, "<", (unsigned char)st, out_arena, (unsigned int)bs_buf_len(&rep));
             e = write_frame(ch.to_prog, (unsigned char)st,
                             out_arena, (unsigned int)bs_buf_len(&rep));
 

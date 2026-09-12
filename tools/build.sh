@@ -59,8 +59,45 @@ $CC $CFLAGS -o build/bsframe tools/bsframe.c
 $CC $CFLAGS -o build/bsbf    tools/bsbf.c
 
 # The broker itself. src/ holds the product; tools/ holds the checkers, and
-# the audit tier at M7 leans on that separation.
+# the audit tier leans on that separation.
+#
+# EVERY TRANSLATION UNIT IS COMPILED SEPARATELY, and the objects are kept,
+# because tools/bsaudit.sh reads them. An audit that read the source would be
+# checking what the code says; reading `nm -u` on the object checks what the
+# compiler actually emitted, which is the difference between a claim and a
+# measurement. Keeping the objects is the whole reason this is not one cc
+# line with eleven files on it.
+BS_UNITS="main broker child ops op_ctl op_time op_rand frame err sys_posix det"
+
+# The platform half of the seam is chosen here, by uname, and its object is
+# the ONLY one compiled with a namespace widening macro. Everything above the
+# seam builds against the common flags and cannot reach a platform extension
+# even by accident; bsaudit.sh checks that against the objects rather than
+# trusting this comment.
+case "$(uname -s)" in
+    FreeBSD) BS_SEAM=sys_freebsd; BS_SEAM_FLAGS=-D__BSD_VISIBLE=1 ;;
+    Linux)   BS_SEAM=sys_linux;   BS_SEAM_FLAGS=-D_GNU_SOURCE ;;
+    *)       echo "build: no platform seam for $(uname -s)" >&2; exit 1 ;;
+esac
+echo "build: seam is src/$BS_SEAM.c"
+
+rm -rf build/obj
+mkdir -p build/obj
+
+for u in $BS_UNITS; do
+    # shellcheck disable=SC2086
+    $CC $CFLAGS -c -o "build/obj/$u.o" "src/$u.c"
+done
+
 # shellcheck disable=SC2086
-$CC $CFLAGS -o build/brainstem     src/main.c src/broker.c src/child.c src/ops.c src/op_ctl.c     src/frame.c src/err.c
+$CC $CFLAGS $BS_SEAM_FLAGS -c -o "build/obj/$BS_SEAM.o" "src/$BS_SEAM.c"
+
+# Recorded rather than inferred: bsaudit.sh must know which object is the
+# platform half, and working it out from uname a second time would be a
+# second definition of the thing this file exists to define once.
+echo "$BS_SEAM" > build/obj/SEAM
+
+# shellcheck disable=SC2086
+$CC $CFLAGS -o build/brainstem build/obj/*.o
 
 echo "build: done"

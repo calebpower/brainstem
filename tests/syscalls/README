@@ -1,0 +1,30 @@
+tests/syscalls — the pinned per-op syscall surface. Tier 10a, tools/bscalls.sh.
+
+One file per case per platform, holding the calls that case made BEYOND the
+broker's own plumbing, counted, from the fork onwards. Most of them are empty,
+and an empty file is the strongest statement in this directory: that fixture
+asked the kernel for nothing at all.
+
+The two directories are not expected to agree, and that is the point of having
+two. Which calls are visible to a tracer is a platform property rather than a
+program property: Linux serves clock_gettime from the vDSO and FreeBSD from
+its timekeeping page, so time.live is empty on both for a reason neither
+shares with the other, while getrandom is a real syscall on Linux and
+arc4random_buf is a userspace generator on FreeBSD that reseeds from the
+kernel at most once.
+
+PROVENANCE, because it differs and pretending otherwise would be the kind of
+thing this project writes tiers to prevent:
+
+  linux/    measured, with `sh tools/bscalls.sh --record`, on ubuntu-26.04.
+  freebsd/  NOT YET MEASURED as of M3. Written from what the platform
+            documents. The four empty files are certain -- none of those
+            paths reaches the kernel on any platform, and rand.seeded's
+            emptiness is a property of det.c rather than of FreeBSD.
+            rand.live is the inference: arc4random_buf seeds its per-thread
+            ChaCha state from the kernel on first use, which should be one
+            getrandom. If the gate says otherwise, the gate is right; the
+            failure prints the observed multiset and the fix is this line.
+
+To re-pin a platform after a deliberate change: sh tools/bscalls.sh --record,
+and say in the commit message what moved and why.

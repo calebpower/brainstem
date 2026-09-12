@@ -28,45 +28,56 @@ is also what makes the broker indifferent to which language is on the far end.
 
 ## Status
 
-**It works, for two of twenty three operations.** A file containing nothing but
-the eight brainfuck instructions, run under a general purpose interpreter,
-reaches an operating system and comes back:
+**It works, for four of twenty three operations.** A file containing nothing
+but the eight brainfuck instructions, run under a general purpose interpreter,
+reaches an operating system and comes back — and since M3 what comes back can
+be a clock reading or sixteen bytes from the kernel:
 
 ```
 > 01 len=10     hello
 < 00 len=48     OK, the 48 byte record
+> 04 len=2      random_bytes, n = 16
+< 00 len=16     82233aa0ca0a14573efd34e9a85da697
 > 02 len=1      exit 0
 < 00 len=0      OK
 ```
 
-Milestone M2, **gated: 94 pass, 0 fail on `freebsd-15.1` and on
-`ubuntu-26.04`.**
+Those sixteen bytes are the same on every machine, because that run passed
+`--seed`. Under a seed the generator is a ChaCha20 keystream computed in the
+broker and **no syscall is issued at all** — which is not a claim, it is
+`tests/syscalls/linux/rand.seeded.txt`, an empty file next to
+`rand.live.txt`, which has one `getrandom` in it.
 
-`ctl.hello` and `ctl.exit` are built. The other twenty one are declared and
-answer NOSUCHOP, which is recoverable — the payload is consumed and the stream
-stays in step, because that is the forward compatibility path for a program
-written against a later version.
+Milestone M3, **gated: see HANDOFF.md for the standing count on
+`freebsd-15.1` and `ubuntu-26.04`.**
+
+`ctl.hello`, `ctl.exit`, `time.clock_now` and `rand.random_bytes` are built.
+The other nineteen are declared and answer NOSUCHOP, which is recoverable —
+the payload is consumed and the stream stays in step, because that is the
+forward compatibility path for a program written against a later version.
 
 Read that for what it is. `ctl` was chosen first precisely because it crosses
-no platform boundary, so what M2 proves is the *channel*: the pipe topology,
-the half duplex discipline that the deadlock proof rests on, and the
-diagnosis for the interpreter buffering defect. Sockets, clocks, files and
-processes are all still ahead, and the platform seam they need lands at M3.
+no platform boundary, so M2 proved the *channel*: the pipe topology, the half
+duplex discipline the deadlock proof rests on, and the diagnosis for the
+interpreter buffering defect. M3 then took the seam's shape from a real
+divergence rather than a hypothesis — `arc4random_buf` on FreeBSD against
+`getrandom` on Linux — which is why time and randomness came before files.
+Sockets, files and processes are still ahead.
 
 ## The operations
 
-Twenty-three, specified in [ABI.md](ABI.md). Two are built; the rest answer
+Twenty-three, specified in [ABI.md](ABI.md). Four are built; the rest answer
 NOSUCHOP until their milestone.
 
 | | |
 |---|---|
 | `hello` `exit` | **built** — handshake, version negotiation, teardown |
-| `clock_now` | realtime and monotonic |
-| `random_bytes` | |
-| `socket` `connect` `bind` `listen` `accept` | |
-| `read` `write` `close` `poll` | files, pipes and sockets alike |
-| `pipe` `spawn` `wait` | **which is how one program drives another** |
-| `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | |
+| `clock_now` | **built** — realtime and monotonic, steerable with `--clock` |
+| `random_bytes` | **built** — from the kernel, or from a seed with `--seed` |
+| `socket` `connect` `bind` `listen` `accept` | M5 |
+| `read` `write` `close` `poll` | M4 — files, pipes and sockets alike |
+| `pipe` `spawn` `wait` | M6 — **which is how one program drives another** |
+| `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | M4 |
 
 ## Other languages
 

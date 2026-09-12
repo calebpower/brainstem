@@ -1,0 +1,26 @@
+# badclock.poke -- ask for a clock that does not exist, and carry on.
+#
+# An unknown clock id is INVAL rather than a silent fall back to realtime: a
+# program that asked for the wrong clock and got a plausible answer would be
+# wrong in a way nothing could show it.
+#
+# INVAL is RECOVERABLE, and this fixture exists as much to prove that as to
+# prove the refusal. The error reply carries no payload -- invariant I6 --
+# so the program reads exactly three bytes and is still in step, which is
+# what lets it go on and exit cleanly.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.3 and 7.2.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   clock_now  op 03, len 1, clock id 2, which is not a clock
+EMIT 03 01 00 02
+#   status 06 INVAL, len 0, and nothing after it
+READ 3
+#   still in step: a second, valid request is answered normally
+EMIT 03 01 00 00
+READ 15
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

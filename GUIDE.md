@@ -93,25 +93,60 @@ Everything after `--` is the command that runs your program. brainstem does not
 interpret brainfuck itself and does not care which interpreter you use, as long
 as it satisfies §2.3.
 
-The options you will actually use:
+The options, and **when each one became real**. The `since` column is not
+decoration: a guide that documents a flag the binary does not have is worse
+than one that documents nothing, because you will spend an afternoon deciding
+your quoting is wrong. `tests/run.sh` checks this table against the argument
+parser in both directions, so a row marked `now` is a flag that exists and a
+row marked for a later milestone is one that is still refused.
 
-| | |
-|---|---|
-| `--preopen-dir NAME=PATH` | a directory your relative paths resolve under |
-| `--preopen-file NAME=PATH:MODE` | one file, mode `r`, `w`, `rw` or `a` |
-| `--preopen-fd NAME=N` | inherit one of brainstem's own descriptors — this is how you get the terminal |
-| `--preopen-listen NAME=ADDR` | a bound, listening socket, ready to accept |
-| `--preopen-connect NAME=ADDR` | an already-connected socket |
-| `--trace FILE` | record every frame in both directions |
-| `--seed HEX` | make `random_bytes` reproducible |
-| `--clock virtual` | make `clock_now` reproducible |
-| `--op-timeout MS` | turn a hang into an error |
+| option | since | what it does |
+|---|---|---|
+| `--trace` | now | print every frame, both directions, payload in hex, to stderr |
+| `--seed HEX` | now | 32 hex characters — makes `random_bytes` reproducible |
+| `--clock SPEC` | now | `live`, `frozen[=EPOCH]`, or `virtual[=EPOCH][,step=NS]` |
+| `--hello-timeout MS` | now | turn a handshake hang into an error; default 5000, 0 disables |
+| `--op-timeout MS` | now | the same for every later frame; default 30000 |
+| `--interp PATH` | now | the interpreter, if you would rather not write `--` |
+| `--check-interpreter PATH` | now | probe an interpreter for the one property §2.3 needs |
+| `--dump-abi` | now | print the op table, one row per line |
+| `--selftest` | now | the broker's own checks |
+| `--preopen-dir NAME=PATH` | M4 | a directory your relative paths resolve under |
+| `--preopen-file NAME=PATH:MODE` | M4 | one file, mode `r`, `w`, `rw` or `a` |
+| `--preopen-fd NAME=N` | M4 | inherit one of brainstem's own descriptors — this is how you get the terminal |
+| `--sort-readdir` | M4 | normalise directory order |
+| `--preopen-listen NAME=ADDR` | M5 | a bound, listening socket, ready to accept |
+| `--preopen-connect NAME=ADDR` | M5 | an already-connected socket |
+| `--replay FILE` | M7 | re-run against a recorded trace, with no syscalls at all |
 
 **Nothing is reachable that you did not name.** There is no way to open a path
 outside a preopened directory, and no ambient network access. That is a
 usability and testing property — it makes runs reproducible and failures
 local — and it is emphatically **not** a security boundary. brainstem runs with
 your credentials. Do not run brainfuck you did not write.
+
+### Making a run repeatable
+
+Two things in this ABI can differ between two runs of the same program, and
+both have a knob:
+
+```sh
+brainstem --seed 000102030405060708090a0b0c0d0e0f \
+          --clock virtual=1700000000,step=1000000 \
+          --trace -- ./build/bfi prog.bf
+```
+
+Under those two flags the trace is a fixed string of bytes. `--seed` replaces
+the host's randomness with a ChaCha20 keystream computed in the broker — no
+syscall is issued at all, which you can see for yourself in
+`tests/syscalls/` — and `--clock virtual` advances time by `step` **once per
+request**, so elapsed time tracks work done rather than wall time. A loop that
+waits for the clock to change still terminates, which is why the virtual clock
+is usually the one you want and `frozen` is for when you need an instant that
+never moves.
+
+The seed is echoed back in the hello reply, all sixteen bytes, so a program can
+see which world it is in without being told out of band.
 
 ---
 
@@ -181,7 +216,9 @@ In brainfuck, emitting that is thirteen literal bytes:
 ```
 
 which is exactly the drudgery §8 exists to remove. You write
-`EMIT 01 0a 00 42 53 54 4d 01 00 00 00` and the expander produces the above.
+`EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00` and the expander produces the
+above. That line is the one in `bf/ctl/hello.poke`, and the suite checks that
+it still is.
 
 ### Reading the reply
 
@@ -212,68 +249,134 @@ again.
 
 ## 6. Three worked programs
 
+These are not written out here by hand. **They are the three fixtures the test
+suite runs**, quoted verbatim, and `tests/run.sh` checks that what appears
+below is byte for byte what is in `bf/`. A guide whose examples are typed out
+separately from the examples that run is a guide with two versions of the
+truth, and the printed one is always the one that rots.
+
 ### Say hello and exit
 
-The smallest complete brainstem program. Handshake, then exit with status 0.
+The smallest complete brainstem program, and the one that proves the whole
+idea: a file containing nothing but the eight brainfuck instructions, running
+under a general purpose interpreter, reaching an operating system.
 
+<!-- bf/ctl/hello.poke -->
 ```
-# hello.poke
-# Frames transcribed from ABI.md sections 3 and 7.2.
-#   hello : op 01, len 10, "BSTM", major 1, minor 0, reserved
-EMIT 01 0a 00 42 53 54 4d 01 00 00 00
-#   drain the reply: status, two length bytes, then 48 + tables.
-#   npreopen is 0 here, so the tail is empty and the record is exactly 48.
-READ 3
-READ 48
-#   exit : op 02, len 1, code 0
+# hello.poke -- shake hands with the broker and exit cleanly.
+#
+# The smallest complete brainstem program, and the one that proves the whole
+# idea: a file containing nothing but the eight brainfuck instructions,
+# running under a general purpose interpreter, reaching an operating system.
+#
+# Frames transcribed by hand from ABI.md sections 3 and 7.2.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+#   the reply is status{1} len{2} then the 48 byte record: 51 bytes, and
+#   npreopen is 0 here so there is no name tail after it
+READ 51
+#   exit  op 02, len 1, code 0
 EMIT 02 01 00 00
+#   exit still answers, because every request gets exactly one reply --
+#   that invariant is the whole deadlock proof, so it has no exceptions
+READ 3
 ```
 
 Run it:
 
 ```sh
+sh tools/bfgen.sh bf/ctl/hello.poke > hello.bf
 brainstem -- ./build/bfi hello.bf ; echo "exit status $?"
 ```
 
-### Print something
+### Ask for the time
 
+<!-- bf/time/clock.poke -->
 ```
-# print.poke
-EMIT 01 0a 00 42 53 54 4d 01 00 00 00
-READ 3
-READ 48
-#   write : op 0b, len 6 + 5, handle 1, flags 0, "hello"
-EMIT 0b 0b 00 01 00 00 00 00 00 68 65 6c 6c 6f
-READ 3
-READ 2
+# clock.poke -- ask for both clocks, then leave.
+#
+# The first fixture that crosses the platform seam. Under --clock frozen or
+# --clock virtual its trace is a fixed string of bytes, which is what makes
+# it the fixture the determinism and platform parity tiers are pinned on:
+# the reply to a clock is otherwise the one thing in this protocol that
+# cannot be the same twice.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.3 and 7.2.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   clock_now  op 03, len 1, clock id 0 = realtime
+EMIT 03 01 00 00
+#   reply is status{1} len{2} sec{8} nsec{4}: fifteen bytes
+READ 15
+#   clock_now  op 03, len 1, clock id 1 = monotonic, which is zero at broker
+#   start rather than time since boot -- see sys.h
+EMIT 03 01 00 01
+READ 15
+#   exit  op 02, len 1, code 0
 EMIT 02 01 00 00
+READ 3
 ```
 
 ```sh
-brainstem --preopen-fd out=1 -- ./build/bfi print.bf
+brainstem --clock frozen=1700000000 -- ./build/bfi clock.bf
 ```
 
-Handle 1 is the first preopen, which is the terminal. The `write` payload is
-the handle as four little-endian bytes, two flag bytes, then the data; the
-length `0x000b` is 6 + 5.
+Monotonic time starts at zero when the broker starts rather than at boot, so
+the first four bytes of `sec` are all you need unless your program runs for
+136 years. Seconds and nanoseconds are separate fields so that **neither side
+divides** — a brainfuck program dividing a 64 bit value is not a thing anyone
+should have to write.
 
-### Ask for the time
+### Ask for random bytes
 
+<!-- bf/rand/bytes.poke -->
 ```
-# clock.poke
-EMIT 01 0a 00 42 53 54 4d 01 00 00 00
+# bytes.poke -- sixteen random bytes, then none at all.
+#
+# Under --seed this is the fixture the determinism tier is pinned on, and
+# the bytes it receives are a ChaCha20 keystream the sibling library can
+# compute in brainfuck -- which is why ABI.md section 9 specifies the
+# construction rather than saying "some PRNG".
+#
+# The second request asks for ZERO bytes. That is legal and returns an empty
+# OK: a program computing a length that happens to come out zero should not
+# have to special case it, and the frame carries its own length so an empty
+# reply is unambiguous. It also must not consume any keystream, which the
+# pinned trace is what proves.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.4 and 7.2.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 51
+#   random_bytes  op 04, len 2, n = 0x0010 = 16, little endian
+EMIT 04 02 00 10 00
+#   reply is status{1} len{2} then sixteen bytes: nineteen
+READ 19
+#   random_bytes  op 04, len 2, n = 0
+EMIT 04 02 00 00 00
+#   status 00, len 0, and nothing after it
 READ 3
-READ 48
-#   clock_now : op 03, len 1, clock_id 1 (monotonic)
-EMIT 03 01 00 01
-#   reply is a status, a length, then sec{8} nsec{4}
-READ 3
-READ 12
+#   exit  op 02, len 1, code 0
 EMIT 02 01 00 00
+READ 3
 ```
 
-Monotonic time starts at zero when the broker starts, so the first four bytes
-of `sec` are all you need unless your program runs for 136 years.
+```sh
+brainstem --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bytes.bf
+```
+
+Under that seed the sixteen bytes are always
+`82233aa0ca0a14573efd34e9a85da697`, on either platform, because the generator
+is a ChaCha20 keystream rather than the host's. Without `--seed` they come
+from the kernel and differ every run.
+
+**Writing to a file or a terminal** needs `write` and a preopen, which arrive
+at M4. Until then the broker's own `--trace` is how you see what your program
+did.
 
 ---
 
@@ -358,11 +461,12 @@ you try.
 **The real debugging tool** is `--trace`:
 
 ```sh
-brainstem --trace run.log --preopen-dir work=. -- ./build/bfi prog.bf
+brainstem --trace -- ./build/bfi prog.bf 2> run.log
 ```
 
-which records every frame in both directions. Since the frames are the whole
-interface, the trace is the whole story of what your program did.
+which prints every frame in both directions, with its payload in hex. Since
+the frames are the whole interface, the trace is the whole story of what your
+program did -- which is also why the suite pins traces rather than output.
 
 ---
 

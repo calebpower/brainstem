@@ -43,6 +43,8 @@ run "bsframe self-test" ./build/bsframe --selftest
 run "bstier self-test" sh tools/bstier.sh --selftest
 run "bsbf self-test" ./build/bsbf --selftest
 run "brainstem self-test" ./build/brainstem --selftest
+run "bsaudit self-test" sh tools/bsaudit.sh --selftest
+run "bscalls self-test" sh tools/bscalls.sh --selftest
 
 # TIER 10c
 echo
@@ -96,6 +98,43 @@ run "every platform guest-setup declares has a branch" sh -c '
 # fuzz coverage it did not have, so here they are two tables and a tool reads
 # both against the suite.
 run "HANDOFF's tier table describes the suite" sh tools/bstier.sh
+
+# The user documentation makes two claims a reader will act on, and both are
+# checkable, so both are checked. A guide that documents a flag the binary does
+# not have costs someone an afternoon deciding their quoting is wrong, and a
+# worked example that has drifted from the fixture it was copied from teaches a
+# frame layout that no longer exists.
+run "GUIDE's option table and the argument parser agree" sh -c '
+    parsed=$(sed -n "s/.*strcmp(a, \"\(--[a-z][a-z-]*\)\").*/\1/p" src/main.c | sort -u)
+    documented=$(sed -n "s/^| \`\(--[a-z][a-z-]*\)[^|]*| now |.*/\1/p" GUIDE.md | sort -u)
+    if [ "$parsed" != "$documented" ]; then
+        echo "the parser accepts:"; echo "$parsed"
+        echo "GUIDE marks as built:"; echo "$documented"
+        exit 1
+    fi
+    exit 0'
+run "no option GUIDE defers to a later milestone is quietly already there" sh -c '
+    parsed=$(sed -n "s/.*strcmp(a, \"\(--[a-z][a-z-]*\)\").*/\1/p" src/main.c | sort -u)
+    rc=0
+    for o in $(sed -n "s/^| \`\(--[a-z][a-z-]*\)[^|]*| M[0-9] |.*/\1/p" GUIDE.md); do
+        printf "%s\n" "$parsed" | grep -qx "$o" && { echo "$o is deferred in GUIDE but parsed today"; rc=1; }
+    done
+    exit $rc'
+run "GUIDE's worked programs are the fixtures the suite runs" sh -c '
+    rc=0
+    for f in bf/ctl/hello.poke bf/time/clock.poke bf/rand/bytes.poke; do
+        awk -v f="$f" "
+            \$0 == \"<!-- \" f \" -->\" { want = 1; next }
+            want && /^\`\`\`\$/ { inblock = !inblock; if (!inblock) { want = 0 }; next }
+            inblock { print }
+        " GUIDE.md > /tmp/guide-block.$$
+        cmp -s /tmp/guide-block.$$ "$f" || { echo "GUIDE has drifted from $f"; rc=1; }
+        rm -f /tmp/guide-block.$$
+    done
+    exit $rc'
+run "the handshake GUIDE tells you to write is the one the fixture writes" sh -c '
+    line=$(grep -m1 "^EMIT 01" bf/ctl/hello.poke)
+    grep -q "\`$line\`" GUIDE.md'
 
 # The vendored interpreter carries one intentional delta from upstream and the
 # whole project rests on it. Someone tidying the vendored file back toward its
@@ -322,6 +361,18 @@ run "the trace shows exactly the four frames" sh -c '
 run "the program chooses the exit status" sh -c '
     ./build/brainstem -- ./build/bfi bf/ctl/exitcode.bf >/dev/null 2>&1; test $? -eq 1'
 
+# The two ops that arrived with the seam. clock_now and random_bytes were
+# chosen to be first because arc4random_buf against getrandom is a REAL
+# divergence -- so the seam took its shape from one rather than from a guess
+# about what might diverge later.
+run "clock_now answers on both clocks" sh -c '
+    ./build/brainstem --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf >/dev/null 2>&1'
+run "random_bytes returns as many bytes as it was asked for" sh -c '
+    ./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null | grep -q "< 00 len=16 "'
+run "random_bytes of zero is a legal empty reply, not an error" sh -c '
+    got=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null | grep -c "^brainstem: < 00 len=0$")
+    test "$got" = 2'
+
 # TIER 6
 echo
 echo "== tier 6: error paths =="
@@ -355,6 +406,77 @@ run "an error reply carries no payload" sh -c '
     ./build/brainstem --trace -- ./build/bfi bf/ctl/nohello.bf  2>&1 | grep -q "< e4 len=0" || rc=1
     exit $rc'
 
+run "an unknown clock id is INVAL rather than a plausible answer" sh -c '
+    ./build/brainstem --trace -- ./build/bfi bf/time/badclock.bf 2>&1 >/dev/null | grep -q "< 06 len=0"'
+run "and INVAL is recoverable: the conversation continues past it" sh -c '
+    ./build/brainstem --clock frozen=1700000000 -- ./build/bfi bf/time/badclock.bf >/dev/null 2>&1'
+
+# TIER 7
+echo
+echo "== tier 7: determinism =="
+# brainstem introduces the two things the sibling library was built to avoid:
+# a clock and a random number generator. bfsodium keeps every run replayable by
+# having neither -- "randomness supplied as input, never generated" -- and a
+# syscall broker cannot keep that rule. So it keeps the PROPERTY instead: both
+# sources stay, and both become steerable.
+#
+# Every case here is a PAIR. One reading proves a number; only the pair proves
+# the knob is connected to anything. A generator that ignored its seed
+# entirely would pass "the same seed repeats" perfectly.
+run "the same seed gives byte identical output" sh -c '
+    a=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    test "$a" = "$b"'
+run "a different seed gives different output" sh -c '
+    a=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e10 -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    test "$a" != "$b"'
+run "an unseeded generator does not repeat itself" sh -c '
+    a=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    test "$a" != "$b"'
+run "a frozen clock reads the same in two runs" sh -c '
+    a=$(./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    test "$a" = "$b"'
+run "a live clock does not" sh -c '
+    a=$(./build/brainstem --trace -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    test "$a" != "$b"'
+run "a virtual clock reads the same in two runs" sh -c '
+    a=$(./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    test "$a" = "$b"'
+
+# The virtual clock is driven by the REQUEST COUNT, which is a property of the
+# program and of nothing else -- not by wall time, and not by how often the
+# clock was read. A step of one whole second makes that legible on the page:
+# the handshake is request one, so the realtime read on request two is epoch
+# plus two seconds (1000 + 2 = 0x3EA) and the monotonic read on request three
+# is three seconds since a start that is defined to be zero.
+run "the virtual clock advances one step per request, not per read" sh -c '
+    got=$(./build/brainstem --trace --clock virtual=1000,step=1000000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < 00 len=12 //p" | tr "\n" " ")
+    test "$got" = "ea0300000000000000000000 030000000000000000000000 "'
+
+# A seed is refused rather than padded, and a clock spec is refused rather
+# than guessed at. A silently truncated seed would make two runs differ for a
+# reason nothing in the output could show, which is the one failure this
+# entire tier exists to make impossible.
+run "a short seed is refused" sh -c '
+    ./build/brainstem --seed 0011 -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+run "a seed that is not hex is refused" sh -c '
+    ./build/brainstem --seed 000102030405060708090a0b0c0d0e0g -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+run "a malformed clock spec is refused" sh -c '
+    ./build/brainstem --clock fixed -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+# "frozen=" with nothing after it meant "frozen=0" in the first draft, because
+# strtol("") is 0 and says so only through errno. The self-test caught it; the
+# case is kept here so the suite says out loud which grammar is meant.
+run "an empty epoch is refused rather than read as zero" sh -c '
+    ./build/brainstem --clock frozen= -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+run "a zero virtual step is refused" sh -c '
+    ./build/brainstem --clock virtual,step=0 -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+
 # TIER 8
 echo
 echo "== tier 8: the interpreter semantics matrix =="
@@ -383,6 +505,81 @@ run "the diagnosis names buffering as the cause" sh -c '
 run "--check-interpreter accepts the vendored interpreter"     ./build/brainstem --check-interpreter ./build/bfi
 run "--check-interpreter rejects a buffering one" sh -c '
     BFI_FLUSH=block ./build/brainstem --check-interpreter ./build/bfi >/dev/null 2>&1; test $? -eq 72'
+
+# TIER 10
+echo
+echo "== tier 10: platform parity =="
+# The same fixtures must produce the same bytes on freebsd-15.1 and on
+# ubuntu-26.04, and the expectation lives in this repository rather than being
+# whatever this machine happened to produce. That distinction is the whole
+# tier: a parity check that records what it sees passes on both guests while
+# they disagree.
+#
+# Exactly ONE byte of the conversation is allowed to differ, and it is
+# normalised to %% before the comparison: the platform byte in the hello
+# reply, which exists precisely to be different. Everything else -- the frame
+# layout, the field widths, the little-endian order, the status codes, the
+# keystream -- is pinned identically for both. This is the tier that catches
+# AF_INET6 being 28 on one and 10 on the other, O_CREAT being 0x0200 and
+# 0x0040, a stat field that is 32 bits in one place, and an errno that escaped
+# the map. At M3 none of those exist yet, which is exactly when to pin the
+# ones that do.
+BS_NORM='s/^\(brainstem: < 00 len=48 .\{40\}\)../\1%%/'
+export BS_NORM
+
+run "clock.bf under a frozen clock matches the pinned trace" sh -c '
+    ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" | cmp -s - tests/trace/clock.frozen.txt'
+run "clock.bf under a virtual clock matches the pinned trace" sh -c '
+    ./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" | cmp -s - tests/trace/clock.virtual.txt'
+run "badclock.bf matches the pinned trace" sh -c '
+    ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/badclock.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" | cmp -s - tests/trace/badclock.frozen.txt'
+run "bytes.bf under a seed matches the pinned trace" sh -c '
+    ./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" | cmp -s - tests/trace/rand.seeded.txt'
+run "hello.bf matches the pinned trace" sh -c '
+    ./build/brainstem --trace --clock frozen=0 --seed 00000000000000000000000000000000 -- ./build/bfi bf/ctl/hello.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" | cmp -s - tests/trace/ctl.hello.txt'
+
+# The one byte the traces above hide, checked here on its own -- and checked
+# against a mapping written HERE rather than read out of the broker, so that
+# the suite is a second opinion about it instead of an echo. sys.h numbers the
+# platforms 1 FreeBSD, 2 Linux, and a build that reported the wrong one would
+# otherwise sail through every case above.
+run "the platform byte is the one this kernel should report" sh -c '
+    case "$(uname -s)" in
+        FreeBSD) want=01 ;;
+        Linux)   want=02 ;;
+        *)       echo "no expectation for $(uname -s)"; exit 1 ;;
+    esac
+    got=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < 00 len=48 .\{40\}\(..\).*/\1/p")
+    test "$got" = "$want"'
+
+# The pinned traces must actually be able to fail. A normalisation that ate
+# too much would make every one of them pass against anything, and nothing
+# above would notice.
+run "the pinned traces are not vacuous" sh -c '
+    ./build/brainstem --trace --clock frozen=1700000001 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" | cmp -s - tests/trace/clock.frozen.txt && exit 1
+    exit 0'
+
+# TIER 10a
+echo
+echo "== tier 10a: the per-op syscall surface =="
+# The measured half of what syscall-lean was going to buy. See tools/bscalls.sh
+# for the window and tests/syscalls/README for what is pinned and what is
+# still inferred on the primary platform.
+run "every op asks the kernel for exactly what is pinned" sh tools/bscalls.sh
+
+# TIER 10b
+echo
+echo "== tier 10b: the seam is narrow =="
+# The other measured half, and this one reads the objects the compiler
+# emitted rather than the source it was given.
+run "the external surface is the one tests/audit/allow.txt declares" sh tools/bsaudit.sh
 
 echo
 echo "== summary =="

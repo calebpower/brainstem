@@ -1,11 +1,17 @@
 /* op_ctl.c — hello and exit.
  *
- * These two are the only ops that never cross the platform seam: they touch
- * no clock, no descriptor and no syscall beyond the broker's own lifecycle.
- * That is why M2 is built out of them. The pipe topology, the half duplex
+ * These two are the only ops that issue no syscall at all: they touch no
+ * clock, no descriptor and nothing beyond the broker's own lifecycle. That
+ * is why M2 is built out of them. The pipe topology, the half duplex
  * discipline, the deadlock proof and the buffering diagnosis all get settled
  * here, once, with no platform surface to confuse the result -- and twenty
  * one more ops inherit a channel that has already been proved.
+ *
+ * Since M3, hello does READ the seam -- sys_platform() and the determinism
+ * knobs -- to report what world the program is in. Every one of those is a
+ * compile time constant or a variable set from argv, so the claim the
+ * syscall tier makes about this file is unchanged: hello's pinned multiset
+ * is empty, and tests/syscalls/<platform>/ctl.hello.txt says so.
  *
  * Note what this file cannot do. It cannot write to the wire: the type that
  * holds the descriptors is declared in broker.c and is not in any header
@@ -14,6 +20,7 @@
  * remembered.
  */
 #include "ops.h"
+#include "det.h"
 
 /* ABI.md section 3. Request: magic "BSTM", want_major u16, want_minor u16,
  * flags u16. Exactly ten bytes, and the dispatcher has already checked that
@@ -70,12 +77,22 @@ bs_err op_ctl_hello(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) 
         bs_put_u32(rep, hi);
     }
 
-    bs_put_u8(rep, 0);        /* platform: filled in at M3, when there is a seam */
-    bs_put_u8(rep, 0);        /* clock_mode: live */
-    bs_put_u8(rep, 0);        /* rng_mode: live */
-    bs_put_u8(rep, 0);        /* reserved */
-    bs_put_u32(rep, 0);       /* clock_step_ns */
-    bs_put_zero(rep, 16);     /* seed, all zero while rng_mode is live */
+    /* The determinism block. A program reads these to know what world it is
+     * in without having to be told out of band -- which matters because the
+     * SAME fixture runs live in the per-op tier and seeded in the
+     * determinism tier, and a fixture that cannot tell the difference cannot
+     * assert anything about either. */
+    bs_put_u8(rep, sys_platform());
+    bs_put_u8(rep, (unsigned int)det_clock_mode());
+    bs_put_u8(rep, det_rng_seeded() ? 1u : 0u);
+    bs_put_u8(rep, 0);                          /* reserved */
+    bs_put_u32(rep, det_clock_step());
+
+    /* The seed is REPORTED BACK, all sixteen bytes, and that is deliberate.
+     * It is not a secret -- it is on the command line -- and echoing it is
+     * what lets a trace be replayed from the trace alone. When no seed is in
+     * force these are sixteen zeros, which is also the value that says so. */
+    bs_put_bytes(rep, det_seed_bytes(), 16);
     bs_put_u16(rep, 0);       /* npreopen: none until M4 */
     bs_put_u16(rep, 0);       /* nametail_len */
 

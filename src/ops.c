@@ -14,6 +14,8 @@
  */
 bs_err op_ctl_hello(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_ctl_exit (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_time_clock_now(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_rand_bytes(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 
 static const struct bs_op bs_ops[] = {
 #define OP(c, n, f, q, p) { (c), #n, f, (q), (p) },
