@@ -136,22 +136,46 @@ run "bsmut self-test" sh tools/bsmut.sh --selftest
 echo
 echo "== tier 10c: one definition of everything =="
 
-# The Containerfile must carry no toolchain definition of its own. bfsodium's
-# comment is the one to remember: a second definition is how the fallback lane
-# starts passing what the gate would fail, silently, because a container with
-# a different compiler still runs every test and still says PASS.
+# NO LANE MAY CARRY A TOOLCHAIN DEFINITION OF ITS OWN, and there are now
+# three of them. bfsodium's comment is the one to remember: a second
+# definition is how a fallback lane starts passing what the gate would fail,
+# silently, because a container with a different compiler still runs every
+# test and still says PASS.
+#
+# tools/guest-setup.sh is the one definition. reaper calls it with no
+# argument, the Containerfile with --toolchain, container-test.sh with
+# --build, and .github/workflows/suite.yml with no argument exactly as reaper
+# does. This check was written for the Containerfile alone and was WIDENED
+# when the CI lane arrived -- a new lane exempt from the rule is the one lane
+# that would drift, because it is the one nobody runs locally.
 #
 # Comment lines are stripped before the search, and that is not a loophole --
-# it is the difference between checking what the file DOES and checking what
-# it SAYS. The first version of this check read the whole file and failed on
-# its own Containerfile, because the comment explaining that there is
-# deliberately no apt-get line contains the words "apt-get line". A check that
-# forbids a token and then trips over the prose explaining the ban teaches the
-# next person to delete the prose, which is the opposite of what is wanted.
-run "the container lane installs nothing of its own" sh -c '
-    directives=$(grep -v "^[[:space:]]*#" Containerfile)
-    printf "%s" "$directives" | grep -q "guest-setup.sh --toolchain" || exit 1
-    ! printf "%s" "$directives" | grep -Eq "apt-get|apt install|pkg install|yum|dnf|apk add"'
+# it is the difference between checking what a file DOES and checking what it
+# SAYS. The first version of this check read the whole file and failed on its
+# own Containerfile, because the comment explaining that there is deliberately
+# no apt-get line contains the words "apt-get line". A check that forbids a
+# token and then trips over the prose explaining the ban teaches the next
+# person to delete the prose, which is the opposite of what is wanted. The
+# workflow's comments say the same thing at length, so it needs the same
+# treatment -- and YAML comments are "#" too, which is the only reason one
+# stripper serves both.
+run "no lane installs a toolchain of its own" sh -c '
+    rc=0
+    for lane in Containerfile .github/workflows/suite.yml; do
+        test -f "$lane" || { echo "$lane is missing"; rc=1; continue; }
+        directives=$(grep -v "^[[:space:]]*#" "$lane")
+        printf "%s" "$directives" | grep -q "guest-setup.sh" \
+            || { echo "$lane does not call guest-setup.sh"; rc=1; }
+        if printf "%s" "$directives" | grep -Eq "apt-get|apt install|pkg install|yum|dnf|apk add"; then
+            echo "$lane installs something of its own"; rc=1
+        fi
+    done
+    exit $rc'
+# The Containerfile specifically must ask for the PROVISION half only, since
+# it is a cached layer and the build comes later. The check above accepts any
+# guest-setup call, so the argument is pinned here rather than lost.
+run "the container lane provisions in its own layer" sh -c '
+    grep -v "^[[:space:]]*#" Containerfile | grep -q "guest-setup.sh --toolchain"'
 
 # One definition of the BUILD, not just of the toolchain. This is the check
 # bfsodium does not have and arguably needs: it carries five cc lines in its
@@ -238,9 +262,30 @@ run "no option GUIDE defers to a later milestone is quietly already there" sh -c
         printf "%s\n" "$parsed" | grep -qx "$o" && { echo "$o is deferred in GUIDE but parsed today"; rc=1; }
     done
     exit $rc'
+# EVERY BLOCK THE GUIDE QUOTES, AND THE LIST IS READ OUT OF THE GUIDE.
+#
+# This checked three of the eight blocks GUIDE.md quotes, which is the worst
+# of both worlds: enough coverage to look covered, not enough to be. Four of
+# the five unchecked ones had drifted, and the network and process examples
+# had been teaching the RACY EIGHT BYTE STREAM READ ever since 4858c12 fixed
+# it -- the one defect in this tree that presents as an intermittent hang, and
+# the one HANDOFF warns will come back.
+#
+# A document that teaches a bug the code has already fixed is worse than one
+# that is merely out of date.
+#
+# So the list is not a list. The files are taken from the guide's own block
+# markers, which means a ninth worked example is checked the moment somebody
+# writes one, rather than the moment somebody remembers this line exists. The
+# count guard below is the other half: a marker pattern that matched nothing
+# would make this check pass having compared nothing at all, which is the
+# failure mode every normalisation in this file is watched for.
 run "GUIDE's worked programs are the fixtures the suite runs" sh -c '
     rc=0
-    for f in bf/ctl/hello.poke bf/time/clock.poke bf/rand/bytes.poke; do
+    quoted=$(sed -n "s|^<!-- \(bf/[a-z]*/[a-z]*\.poke\) -->$|\1|p" GUIDE.md)
+    n=$(printf "%s\n" "$quoted" | grep -c .)
+    test "$n" -ge 8 || { echo "GUIDE quotes $n worked programs; it had eight"; exit 1; }
+    for f in $quoted; do
         awk -v f="$f" "
             \$0 == \"<!-- \" f \" -->\" { want = 1; next }
             want && /^\`\`\`\$/ { inblock = !inblock; if (!inblock) { want = 0 }; next }

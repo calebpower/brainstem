@@ -32,10 +32,10 @@ it.
 
 ---
 
-## 2. The three things that will trip you up first
+## 2. The four things that will trip you up first
 
 Read these before you write anything. Each of them has cost somebody an
-afternoon.
+afternoon, and the fourth cost this project a defect that shipped.
 
 ### Your stdin and stdout are gone
 
@@ -87,6 +87,39 @@ brainstem --check-interpreter ./my-interpreter
 and if a handshake never arrives it says so and names buffering as the likely
 cause. The vendored `tools/bfi` is already fixed. For an interpreter you cannot
 change, `stdbuf -o0` usually does it.
+
+### A read returns *up to* n bytes
+
+Ask for eight and you may get two. That is not a brainstem rule, it is what
+reading from a stream means everywhere — a pipe or a socket hands over
+whatever has arrived, and how much has arrived is a scheduling question about
+some other process.
+
+**So a read of one byte is the only read that is deterministic.** It blocks
+until there is a byte and then returns exactly it. If you want a known number
+of bytes from a pipe or a socket, you loop:
+
+```
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+```
+
+If you ask for eight and then read a reply sized for the two you expected, the
+conversation **desyncs**, and a desync does not look like a wrong answer. It
+looks like a hang: your program waits for bytes that were never sent, the
+broker waits for a request that never comes, and nothing is printed.
+
+This is the fourth item here because both `bf/net/loopback.poke` and
+`bf/proc/drive.poke` had it wrong, shipped, and passed every test for two
+milestones. Forty runs under deliberate CPU load on a quiet eight-core machine
+got the convenient answer forty times. A loaded single-processor guest did not.
+It is the hardest bug in this document to find and the easiest to avoid.
+
+A file is different: `read` on a regular file returns what you asked for up to
+end of file, so the worked example in §6.4 reads eight and gets two only
+because the file is two bytes long.
 
 ---
 
@@ -527,6 +560,7 @@ READ 10
 #   is status END and a zero length rather than a payload to parse
 EMIT 14 06 00 04 00 02 00 00 00
 READ 3
+#   close  op 0c, handle 0x00020004, which closes the directory walk with it
 EMIT 0c 04 00 04 00 02 00
 READ 3
 #   exit  op 02, len 1, code 0
@@ -624,10 +658,14 @@ READ 39
 #   write  op 0b, handle 5 (the client end), flags 0, "hi"
 EMIT 0b 08 00 05 00 00 00 00 00 68 69
 READ 5
-#   read  op 0a, handle 6 (the accepted end), n 8, flags 0.  Two bytes come
-#   back, and they came through a real TCP socket.
-EMIT 0a 08 00 06 00 00 00 08 00 00 00
-READ 5
+#   read  op 0a, handle 6 (the accepted end), ONE BYTE AT A TIME.  A read
+#   returns UP TO n bytes and a stream may deliver them in any grouping it
+#   likes, so asking for two and assuming two is a race waiting for a busier
+#   machine.  See drive.poke, where exactly that happened.
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
 #   close all three, youngest first
 EMIT 0c 04 00 06 00 00 00
 READ 3
@@ -732,14 +770,25 @@ READ 5
 #   close handle 5, so the child sees end of input and stops
 EMIT 0c 04 00 05 00 00 00
 READ 3
-#   read  op 0a, handle 6, n 8 -- the child's stdout.  Two bytes: "hi", which
-#   went out through one pipe, through a second brainfuck program, and back
-#   through another.
-EMIT 0a 08 00 06 00 00 00 08 00 00 00
-READ 5
-#   read again: the child has exited and closed its end, so this is END with
+#   read  op 0a, handle 6 -- the child's stdout -- ONE BYTE AT A TIME.
+#
+#   A read returns UP TO n bytes, never exactly n, and this fixture asked for
+#   eight and assumed two until a gate said otherwise. The child is an
+#   interpreter with unbuffered output, so it emits 'h' and 'i' as two
+#   separate one byte writes; whether both are in the pipe when the read
+#   happens is a scheduling question. On a quiet machine the answer was always
+#   two, which is the worst kind of always.
+#
+#   Asking for one byte is deterministic: a read of one blocks until there is
+#   a byte and then returns exactly it. A program that wants a known number of
+#   bytes from a STREAM has to loop, and this is what the loop looks like.
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+#   a third read: the child has exited and closed its end, so this is END with
 #   an empty payload
-EMIT 0a 08 00 06 00 00 00 08 00 00 00
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
 READ 3
 #   wait  op 10, handle 8, flags 0 -- blocking.  state 1 exited, code 0.
 EMIT 10 06 00 08 00 00 00 00 00
@@ -747,6 +796,8 @@ READ 7
 #   wait again: idempotent after reaping, from the cached status
 EMIT 10 06 00 08 00 00 00 00 00
 READ 7
+#   close the pipe end and then the process handle.  Closing a process
+#   handle stops tracking the child; it does not kill it.
 EMIT 0c 04 00 06 00 00 00
 READ 3
 EMIT 0c 04 00 08 00 00 00
@@ -844,10 +895,20 @@ READ 3
 #   unlink "f", leaving nothing behind for the next fixture that runs here
 EMIT 15 07 00 ff ff ff ff 00 00 66
 READ 3
-#   stat "/" -- OK, and thirty two bytes back.  An ABSOLUTE PATH, which the
-#   preopen model refused and this one does not.  The system is visible.
-EMIT 13 07 00 ff ff ff ff 00 00 2f
-READ 35
+#   open "/" READ|DIRECTORY = 0x0041 -- OK.  An ABSOLUTE PATH, which the
+#   preopen model refused and this one does not: the system is visible.
+#
+#   It is an open rather than a stat ON PURPOSE.  The first version of this
+#   case stat'd "/" and the tier 10 pin went red on a machine whose root
+#   directory had a different size and mode -- a reply that depends on the
+#   HOST is not a reply a parity tier can pin.  A handle is a reply that
+#   depends only on the program: slot 4 was closed above, so this comes back
+#   as 0x00010004.
+EMIT 11 09 00 ff ff ff ff 41 00 00 00 2f
+READ 7
+#   close the root handle
+EMIT 0c 04 00 04 00 01 00
+READ 3
 #   exit  op 02, len 1, code 0
 EMIT 02 01 00 00
 READ 3

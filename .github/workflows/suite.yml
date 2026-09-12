@@ -1,0 +1,81 @@
+# The third lane, and the weakest of the three.
+#
+# `reaper test` is the gate of record and it is TWO guests: freebsd-15.1 and
+# ubuntu-26.04. `tools/container-test.sh` is the fallback for a host that
+# cannot reach the reaper site, and it covers the second of those. This runs
+# the same suite again on a pull request, so a change is not reviewed blind --
+# but a green tick here has proved nothing about the PRIMARY platform, and the
+# job says so in its own output rather than leaving the tick to imply it.
+#
+# That matters more here than it would in most repositories. Every portability
+# defect this project has had took the same shape: the development host and
+# the container agree with each other, and FreeBSD disagrees with both. Three
+# of them were invisible to everything runnable on Linux. A lane that runs on
+# Linux is a lane that cannot see the class of bug this project actually gets.
+#
+# WHY A CONTAINER RATHER THAN A RUNNER IMAGE. reaper provisions ubuntu-26.04
+# and the Containerfile pins `FROM ubuntu:26.04`, so both existing lanes
+# compile the vendored interpreter against the same libc with the same
+# compiler. GitHub's hosted images are a different userland on a different
+# release cadence, and a lane that tests a different userland is answering a
+# different question. Running IN ubuntu:26.04 keeps all three comparable.
+#
+# WHY THIS FILE INSTALLS NOTHING. tools/guest-setup.sh is the only definition
+# of the toolchain in this repository. reaper calls it with no argument, the
+# Containerfile calls it with --toolchain, container-test.sh calls it with
+# --build, and this calls it with no argument exactly as reaper does. An
+# apt-get line here would be a THIRD definition, and the day it drifts is the
+# day a pull request goes green against a toolchain the gate would reject --
+# silently, because a container with a different compiler still runs every
+# test and still says PASS. tests/run.sh greps this file to prove it stays
+# that way: the same check that has always guarded the Containerfile, widened
+# when this lane was added.
+
+name: suite
+
+on:
+  pull_request:
+
+# A pull request that is pushed to again does not need the previous run.
+concurrency:
+  group: suite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    name: the whole suite, on ubuntu 26.04
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:26.04
+    # Generous rather than tight. The suite is about ten seconds and tier 11
+    # is about seventy, so this is two orders of magnitude of headroom; the
+    # point of the limit is that a HANG ends rather than that a slow run is
+    # punished, which is the same thing tier 9 exists for one level down.
+    timeout-minutes: 30
+
+    steps:
+      - name: check out the tree under test
+        uses: actions/checkout@v4
+
+      - name: provision the toolchain
+        # Byte for byte what .reaper.toml's [build] runs: the apt transaction
+        # and then the compiler invocations, both from the one definition.
+        run: sh tools/guest-setup.sh
+
+      - name: run the suite
+        # No pipe into tee. /bin/sh here is dash -- no pipefail, no
+        # PIPESTATUS -- and the suite's exit status is the entire point of
+        # running it. Streamed straight to the job log so the step's status is
+        # the suite's, which is the same reason .reaper.toml redirects into a
+        # file and re-raises rather than piping.
+        run: sh tests/run.sh
+
+      - name: say what this did and did not prove
+        if: always()
+        run: |
+          echo "This was the CI lane, and it is the weakest of the three."
+          echo "'reaper test' is the gate of record and has NOT run: it is"
+          echo "freebsd-15.1 and ubuntu-26.04, and this is one Linux userland."
+          echo "A green tick here means the suite passed on ubuntu 26.04. It"
+          echo "does not mean the change is landed, and it says nothing at all"
+          echo "about the primary platform."

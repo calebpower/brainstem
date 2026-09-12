@@ -360,7 +360,7 @@ marker in the suite at all.
 | 10 | yes | 13 | platform parity, against traces pinned in tests/trace/ |
 | 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
-| 10c | yes | 11 | the tables, the lanes and the frozen ABI version agree |
+| 10c | yes | 12 | the tables, the three lanes and the frozen ABI version agree |
 | 11 | yes | 1 | mutation: 33 defects, each caught by a NAMED check |
 
 ## Why this project exists, since the name is not obvious
@@ -420,7 +420,14 @@ There are **two fallbacks and each covers one half**:
     sh tests/run.sh                 # the FreeBSD half, on a FreeBSD host
     sh tools/container-test.sh      # the Linux half, anywhere with podman
 
-Neither substitutes for the other. On a FreeBSD host the native run *is* the
+And since M7 a **third lane**, `.github/workflows/suite.yml`, which runs the
+same suite on a pull request inside `ubuntu:26.04`. It is the weakest of the
+three and its final step says so in the job log, because a green tick is
+exactly the kind of thing that quietly implies more than it proved: it is one
+Linux userland, and every portability defect this project has had was
+invisible to Linux.
+
+Neither fallback substitutes for the other. On a FreeBSD host the native run *is* the
 gate's own procedure, because the tenant is `exec = "host"`. podman on FreeBSD
 runs jails, not Linux containers, so there is no container lane that could
 cover the primary target, and the container lane covers the platform that
@@ -434,10 +441,11 @@ missing and why.
 
 ## How the lanes are wired
 
-`tools/guest-setup.sh` is **the one definition of the toolchain** and both
-lanes run it. reaper calls it with no argument; the `Containerfile` calls it
+`tools/guest-setup.sh` is **the one definition of the toolchain** and every
+lane runs it. reaper calls it with no argument; the `Containerfile` calls it
 with `--toolchain` so the slow half is a cached layer; `container-test.sh`
-calls it with `--build`. If the Containerfile ever grows its own package line
+calls it with `--build`; the CI workflow calls it with no argument, exactly as
+reaper does. If any lane ever grows its own package line
 there are two definitions, and the fallback begins passing what the gate would
 fail — silently, since a container with a different compiler still runs every
 test and still says PASS. `tests/run.sh` checks for that.
