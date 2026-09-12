@@ -64,10 +64,19 @@ READ 3
 #   unlink "f", leaving nothing behind for the next fixture that runs here
 EMIT 15 07 00 ff ff ff ff 00 00 66
 READ 3
-#   stat "/" -- OK, and thirty two bytes back.  An ABSOLUTE PATH, which the
-#   preopen model refused and this one does not.  The system is visible.
-EMIT 13 07 00 ff ff ff ff 00 00 2f
-READ 35
+#   open "/" READ|DIRECTORY = 0x0041 -- OK.  An ABSOLUTE PATH, which the
+#   preopen model refused and this one does not: the system is visible.
+#
+#   It is an open rather than a stat ON PURPOSE.  The first version of this
+#   case stat'd "/" and the tier 10 pin went red on a machine whose root
+#   directory had a different size and mode -- a reply that depends on the
+#   HOST is not a reply a parity tier can pin.  A handle is a reply that
+#   depends only on the program: slot 4 was closed above, so this comes back
+#   as 0x00010004.
+EMIT 11 09 00 ff ff ff ff 41 00 00 00 2f
+READ 7
+EMIT 0c 04 00 04 00 01 00
+READ 3
 #   exit  op 02, len 1, code 0
 EMIT 02 01 00 00
 READ 3

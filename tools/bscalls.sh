@@ -67,8 +67,17 @@ repo=$(CDPATH= cd -- "$here/.." && pwd)
 # own interpreter inside the window, so a count here would mix that with
 # proc.wait's. Named rather than quietly dropped, because the ambiguity is
 # worth knowing about before someone adds a case that depends on it.
+#
+# brk joined this list after it changed from 2 to 3 between two versions of the
+# same fixture. It is the C library's HEAP GROWING, which is a function of
+# allocation history rather than of anything an op asked the kernel for -- and
+# tier 10b already proves the broker itself allocates nothing, so a brk here
+# can only ever be libc's. Pinning it meant pinning glibc's malloc behaviour,
+# which is not what this tier is for and not something either platform
+# promises. mmap stays visible: it carried real information on FreeBSD, where
+# arc4random_buf allocates its generator state with an mmap and a minherit.
 BASELINE="read write poll close wait4 sigprocmask sigaction sigreturn
-exit kill ioctl"
+exit kill ioctl brk"
 
 # Spellings that belong to the tracer rather than to the program.
 normalise_calls() {
@@ -134,6 +143,9 @@ time.live||bf/time/clock.bf
 time.frozen|--clock frozen=1700000000|bf/time/clock.bf
 rand.live||bf/rand/bytes.bf
 rand.seeded|--seed 000102030405060708090a0b0c0d0e0f|bf/rand/bytes.bf
+fs.roundtrip|%W|bf/fs/roundtrip.bf
+proc.drive|--op-timeout 5000 %P|bf/proc/drive.bf
+proc.refused|--op-timeout 5000 %P|bf/proc/refused.bf
 EOT
 }
 
@@ -158,10 +170,7 @@ EOT
 # %W in the options is replaced with a directory created fresh for that case.
 observe_cases() {
     cat <<'EOT'
-fs.roundtrip|%W|bf/fs/roundtrip.bf
 fs.refused|%W|bf/fs/refused.bf
-proc.drive|--op-timeout 5000 %P|bf/proc/drive.bf
-proc.refused|--op-timeout 5000 %P|bf/proc/refused.bf
 EOT
 }
 

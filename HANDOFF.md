@@ -88,12 +88,31 @@ stdin, stdout and stderr, as 1, 2 and 3. Writing to handle 2 prints. That
 covers the one thing a path cannot portably express -- a descriptor handed
 over by a shell -- and it needs no flag, so there is nothing to agree on.
 
-**The trap that came with it.** The hello reply now reports what those three
-descriptors actually ARE, so it depends on how the broker was invoked: stdin
-as a terminal reports different rights than stdin as /dev/null. That broke
-five pinned traces in a way that looked like a code bug. Every broker
-invocation in `tests/run.sh` now names its own stdin, and there is a comment
-there saying why. Anything else that pins a trace must do the same.
+**The trap that came with it, and it took two rounds to see the whole of it.**
+The hello reply now reports what those three descriptors actually ARE, so it
+depends on how the broker was invoked. Naming `/dev/null` on every invocation
+in `tests/run.sh` was necessary and not sufficient: the gate still failed all
+seven hello-bearing traces on FreeBSD, because the kinds and rights of a
+guest's stdio are not the suite's to control.
+
+So the handle table is **masked** in tier 10 now, the way the platform byte
+already was. What it reports is a property of the INVOCATION, not of the
+program or the protocol, and a parity tier that pins it is pinning the wrong
+thing. The name tail after it stays pinned, and a separate check asserts three
+handles numbered 1, 2 and 3 with the right names.
+
+**The same mistake, once more, in the same session.** `bf/fs/refused.poke`
+ended with `stat "/"` to show that an absolute path works. A stat of the root
+reports a size and a mode belonging to the host, so the pin went red on a
+Linux guest that was not my container. It is an `open` of `/` now, which
+returns a handle -- a reply that depends only on the program.
+
+**The rule both of those are instances of:** a parity tier may only pin bytes
+the PROGRAM determines. Anything the host, the invocation or the C library
+decides has to be masked or measured, never pinned. `brk` came off the syscall
+baseline for the same reason on the same day: it is glibc's heap growing, it
+changed from 2 to 3 between two versions of one fixture, and tier 10b already
+proves the broker allocates nothing -- so a `brk` can only ever be libc's.
 
 ### The three decisions in M6 worth not relitigating
 
@@ -144,15 +163,11 @@ twenty three, the metamorphic checks that span ops, freezing `ABI.md`,
 
 ### Tier 10a: five cases pinned, four being re-measured
 
-Every fs and proc fixture changed shape when the preopen model was removed, so
-their pinned syscall multisets are stale and the four cases are back in
-`bscalls`' report list. The suite measures and prints them on both guests;
-paste the FreeBSD half in and move them back into `cases()`.
-
-Linux currently reports `fs.roundtrip` as 2 brk, 3 fcntl, 6 fstat, 2
-getdents64, 1 lseek, 1 mkdirat, 3 open, 1 renameat, 1 unlinkat; `fs.refused`
-as 2 fstat, 2 open, 1 unlinkat; `proc.drive` as 4 fcntl, 1 fork, 2 pipe; and
-`proc.refused` as 1 fork.
+`fs.roundtrip`, `proc.drive` and `proc.refused` are pinned again on both
+platforms, from the gate's own measurements. `fs.refused` is in the report
+list because its fixture changed after those numbers were taken -- the
+`stat "/"` at the end became an `open` -- and measuring beats guessing.
+Linux reports it as 2 fstat, 3 open, 1 unlinkat.
 
 The result worth keeping from the last round: **the proc cases measured
 identically on both platforms**, which nothing else non-empty in
@@ -244,7 +259,7 @@ marker in the suite at all.
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
 | 10 | yes | 10 | platform parity, against traces pinned in tests/trace/ |
-| 10a | yes | 1 | per-op syscall surface — ctl, time and rand pinned; fs and proc under re-measurement |
+| 10a | yes | 1 | per-op syscall surface — eight cases pinned, fs.refused re-measuring |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 10 | the tables and the lane definitions agree |
 | 11 | manual | 0 | mutation, a discipline rather than a check |

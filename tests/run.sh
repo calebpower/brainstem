@@ -455,9 +455,16 @@ run "readdir yields one entry then ends" sh -c '
 # program can check rather than assume. The hex is "stdin" "stdout" "stderr"
 # with their length bytes, which is the tail of the record.
 run "the hello table describes the three standard handles" sh -c '
-    got=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>&1 >/dev/null \
-          | grep -c "05737464696e067374646f757406737464657272$")
-    test "$got" = 1'
+    out=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>&1 >/dev/null)
+    printf "%s" "$out" | grep -q "05737464696e067374646f757406737464657272$" \
+        || { echo "the names are not stdin, stdout, stderr"; exit 1; }
+    printf "%s" "$out" | grep -q "03001400010000000" \
+        || { echo "not three handles starting at 1"; exit 1; }
+    printf "%s" "$out" | grep -q "02000000" \
+        || { echo "handle 2 is missing"; exit 1; }
+    printf "%s" "$out" | grep -q "03000000" \
+        || { echo "handle 3 is missing"; exit 1; }
+    exit 0'
 
 
 # The five net ops, in one conversation, with no second process involved.
@@ -579,7 +586,7 @@ run "every filesystem refusal lands on its own status, in order" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
     got=$( (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/refused.bf" </dev/null) 2>&1 >/dev/null \
           | sed -n "s/^brainstem: < \(..\) len=.*/\1/p" | tr "\n" " ")
-    want="00 05 06 06 06 00 04 09 00 03 03 00 00 00 "
+    want="00 05 06 06 06 00 04 09 00 03 03 00 00 00 00 "
     if [ "$got" != "$want" ]; then
         echo "wanted: $want"
         echo "got:    $got"
@@ -594,11 +601,13 @@ run "and the program survives all nine and exits cleanly" sh -c '
 # brainstem exists to make the system visible to a brainfuck program, and a
 # literal path is the cheapest thing such a program can emit. Refusing one
 # only ever cost reachability -- it never bought containment, because this was
-# never a sandbox. The fixture stats "/" and expects thirty two bytes back.
+# never a sandbox. The fixture opens "/" as a directory and expects a handle
+# back -- an open rather than a stat, because a stat of the root reports a
+# size and a mode belonging to the HOST, and a parity tier cannot pin those.
 run "an absolute path reaches the system it names" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
     (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/refused.bf" </dev/null 2>&1 >/dev/null) \
-        | grep -q "^brainstem: < 00 len=32 02"'
+        | grep -q "^brainstem: < 00 len=4 04000100$"'
 
 
 # The socket refusals, in order. Two are worth naming. Family 3 Unix is
@@ -774,11 +783,18 @@ echo "== tier 10: platform parity =="
 # moment a fixture took a preopen -- a mask that matches nothing does not
 # fail, it stops asking, which is the failure mode this whole tier fears.
 #
+# The THIRD mask is the handle table: thirty six bytes describing what the
+# broker's own stdin, stdout and stderr actually are. Those kinds and rights
+# are a property of HOW THE BROKER WAS INVOKED, not of the program or the
+# protocol, so pinning them made every trace fail on a guest whose stdio was
+# wired up differently. The name tail after it is deterministic and stays
+# pinned, and the handles themselves are checked on their own below.
+#
 # The second mask is stat's mtime, twelve bytes of it. A file's modification
 # time is not a property of the program and cannot be pinned; everything else
 # in the 32 byte record is. stat is the only 32 byte reply the pinned fixtures
 # produce, and the vacuity check below is what keeps both masks honest.
-BS_NORM='s/^\(brainstem: < 00 len=[0-9]* 4253544d.\{32\}\)../\1%%/;s/^\(brainstem: < 00 len=32 .\{24\}\).\{24\}/\1MMMMMMMMMMMMMMMMMMMMMMMM/'
+BS_NORM='s/^\(brainstem: < 00 len=[0-9]* 4253544d.\{32\}\)../\1%%/;s/^\(brainstem: < 00 len=32 .\{24\}\).\{24\}/\1MMMMMMMMMMMMMMMMMMMMMMMM/;s/^\(brainstem: < 00 len=[0-9]* 4253544d.\{88\}\).\{72\}/\1HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH/'
 export BS_NORM
 
 
