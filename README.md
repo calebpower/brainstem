@@ -48,8 +48,8 @@ broker and **no syscall is issued at all** — which is not a claim, it is
 `tests/syscalls/linux/rand.seeded.txt`, an empty file next to
 `rand.live.txt`, which has one `getrandom` in it.
 
-Milestone M3, **gated: see HANDOFF.md for the standing count on
-`freebsd-15.1` and `ubuntu-26.04`.**
+Milestone M3, **gated: 132 pass, 0 fail on `freebsd-15.1` and on
+`ubuntu-26.04`.**
 
 `ctl.hello`, `ctl.exit`, `time.clock_now` and `rand.random_bytes` are built.
 The other nineteen are declared and answer NOSUCHOP, which is recoverable —

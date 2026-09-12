@@ -18,10 +18,8 @@ randomness, and comes back.
     > 02 len=1      exit 0
     < 00 len=0      OK
 
-**Gated on Linux: 132 pass, 0 fail in the container lane.** M2 was 94 on both
-guests, M0 was 22. THE FREEBSD HALF OF M3 HAS NOT RUN YET — see *The one thing
-M3 is guessing about*, below, which names the single file most likely to be
-wrong and says what to do about it.
+**Gated: 132 pass, 0 fail on `freebsd-15.1` and 132 pass, 0 fail on
+`ubuntu-26.04`.** M2 was 94 on both guests, M0 was 22.
 
 Four of the twenty three ops are built: `ctl.hello`, `ctl.exit`,
 `time.clock_now` and `rand.random_bytes`. The other nineteen are declared in
@@ -58,22 +56,33 @@ from one rather than from a hypothesis about what might diverge later.
   committed rather than observed at run time, which is the whole difference
   between a parity tier and a tier that passes on two machines that disagree.
 
-### The one thing M3 is guessing about
+### What the gate found that this host could not
 
-`tests/syscalls/freebsd/rand.live.txt` says one `getrandom`. **That line was
-written from what FreeBSD documents, not from a run**, and it is the only
-unmeasured expectation in the tree. `arc4random_buf` seeds a per-thread ChaCha
-state from the kernel on first use; if this FreeBSD serves that from a shared
-page instead, the file should be empty and the gate will say so — tier 10a
-prints the observed multiset next to the expected one, so the fix is that one
-line. The other four FreeBSD files are empty and are certain: none of those
-paths reaches the kernel on any platform, and `rand.seeded` being empty is a
-property of `det.c` rather than of FreeBSD.
+M3 reached `freebsd-15.1` with three tiers red across two runs, and every one
+of them was the same shape the project has now hit five times: the development
+host and the container agree with each other, and the primary platform
+disagrees with both.
 
-Everything else about the FreeBSD half is the same shape of blind write that
-M0 and M2 survived. `nm` output parsing in `bsaudit.sh` was written against
-both GNU and elftoolchain conventions deliberately, and `bscalls.sh` parses
-`kdump` and `strace` in one script for the same reason.
+**Tier 10b, the symbol audit.** Two causes, both toolchain rather than
+program. FreeBSD spells `stderr` as `__stderrp`, a pointer behind a macro, and
+the undecorator stripped the leading underscores to produce `stderrp`, which
+matches nothing. And clang rewrites a call whose format string has no
+conversions — `printf("done")` becomes `puts`, `fprintf(stderr, "done")`
+becomes `fwrite` — while gcc under `_FORTIFY_SOURCE` does neither. Pinning
+either set fails on whichever platform chose the other, so the allowlist now
+takes a trailing `?` for a row that is permitted but not required.
+
+**Tier 10a, the syscall surface.** Both remaining failures were expectations I
+had written from documentation rather than from a run, and both were wrong;
+they are pinned from the gate now and the reasoning is in the traps below and
+in `tests/syscalls/README`.
+
+**What none of this was.** Not a bug in the broker, not a bug in the seam, and
+not anything a Linux run could have found. The parts written blind and
+deliberately defensive all held: `bsaudit.sh` parses both GNU and elftoolchain
+`nm` conventions, `bscalls.sh` parses `kdump` and `strace` in one file, and
+neither needed touching. What failed was every place I had written down a
+specific fact about FreeBSD instead of a mechanism for discovering it.
 
 That ordering was deliberate — the first commit has to be green on the machine
 of record, and you cannot claim that without the lane that runs it. It also
@@ -130,7 +139,7 @@ marker in the suite at all.
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
 | 10 | yes | 7 | platform parity, against traces pinned in tests/trace/ |
-| 10a | yes | 1 | per-op syscall surface — FreeBSD side pinned but unmeasured |
+| 10a | yes | 1 | per-op syscall surface, measured on both platforms |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 10 | the tables and the lane definitions agree |
 | 11 | manual | 0 | mutation, a discipline rather than a check |
