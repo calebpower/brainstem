@@ -35,15 +35,17 @@ two bytes, reads its answer, and collects its exit status:
 
 ```
 > 0e len=2      pipe
-< 00 len=8      OK, handles 2 and 3
+< 00 len=8      OK, handles 4 and 5      (1, 2 and 3 are the broker's stdio)
 > 0e len=2      pipe
-< 00 len=8      OK, handles 4 and 5
-> 0f len=53     spawn "bfi" "echo.bf", child fd 0 <- handle 2, fd 1 <- handle 5
-< 00 len=4      OK, process handle 6
-> 0b len=8      write handle 3, "hi"
-> 0a len=8      read handle 4
-< 00 len=2      6869
-> 10 len=6      wait handle 6
+< 00 len=8      OK, handles 6 and 7
+> 0f len=53     spawn "bfi" "echo.bf", child fd 0 <- handle 4, fd 1 <- handle 7
+< 00 len=4      OK, process handle 8
+> 0b len=8      write handle 5, "hi"
+> 0a len=8      read handle 6, one byte
+< 00 len=1      68
+> 0a len=8      read handle 6, one byte
+< 00 len=1      69
+> 10 len=6      wait handle 8
 < 00 len=4      exited, code 0
 ```
 

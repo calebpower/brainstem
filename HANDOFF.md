@@ -27,11 +27,11 @@ an interpreter on a *second* brainfuck program with those pipes as its stdin
 and stdout, sends it two bytes, reads its answer, and collects its exit
 status.
 
-    > 0f len=53     spawn "bfi" "echo.bf", child fd 0 <- handle 2, fd 1 <- handle 5
-    < 00 len=4      OK, process handle 6
-    > 0a len=8      read handle 4
-    < 00 len=2      6869
-    > 10 len=6      wait handle 6
+    > 0f len=53     spawn "bfi" "echo.bf", child fd 0 <- handle 4, fd 1 <- handle 7
+    < 00 len=4      OK, process handle 8
+    > 0a len=8      read handle 6, ONE BYTE -- a read returns up to n, never n
+    < 00 len=1      68
+    > 10 len=6      wait handle 8
     < 00 len=4      exited, code 0
 
 **M6 was gated at 173 pass, 0 fail on both guests.** M7's own gate number goes
