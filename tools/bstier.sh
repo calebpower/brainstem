@@ -10,8 +10,11 @@
 # same voice as the tiers that ran, and a reader seeing that beside a green
 # suite concluded there was fuzz coverage. There was none. A table describing
 # what you want and what you have in one column drifts the moment those
-# differ, and brainstem declares eighteen tiers and has built eleven, so here
-# they differ almost everywhere.
+# differ, and at M0 brainstem declared nineteen tiers and had built four, so
+# for six milestones they differed almost everywhere. Since M7 every declared
+# tier is built -- the nineteenth was deleted rather than implemented -- which
+# is exactly when a table like this needs a tool more than ever, because a
+# column of yes is a column nobody reads.
 #
 # WHY SH AND AWK RATHER THAN PERL. The first version of this was perl, ported
 # from the sibling, and it failed on freebsd-15.1 -- twice, once for itself

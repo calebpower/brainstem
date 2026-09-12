@@ -77,8 +77,7 @@ echo "container-test: building $IMAGE (the first build needs a network)"
 # --security-opt seccomp=unconfined, and the reason, because a bare security
 # flag in a script invites someone to delete it: the default profile filters
 # syscalls the broker legitimately makes -- clone3 behind posix_spawn has been
-# blocked outright by older profiles -- and it would refuse the seccomp filter
-# the purity tier installs. Either failure surfaces as an op returning a
+# blocked outright by older profiles. That failure surfaces as an op returning a
 # plausible-looking error rather than as a container problem, which is the
 # worst shape a lane-specific defect can take: the fallback disagreeing with
 # the gate about the PRODUCT. reaper runs exec = "host" and has no such

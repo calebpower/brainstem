@@ -254,7 +254,6 @@ see.
 | 10b the seam is narrow | Has the platform surface leaked upward? | `bsaudit`: per-object undefined-symbol allowlists, each op symbol referenced exactly once, `errno` only in the seam files, namespace macros only in two. |
 | 10c the tables agree | Do the spec, the code and the configuration describe each other? | `bsabi` diffs `--dump-abi` against ABI.md both directions; the suite checks the toolchain has one definition, the build has one definition, and the guests reaper will run are the ones `guest-setup.sh` knows. |
 | 11 mutation | Would the suite catch the bug it claims to? | `tools/bsmut.sh` copies the tree, breaks one thing, relinks the broker alone, and runs the suite filtered to THE CHECK THAT MUTATION IS SUPPOSED TO BREAK -- which must then fail. One mutation per built op plus the invariants the ABI rests on. Naming the check makes the table a coverage map rather than a pass/fail: a survivor says which op has lost its cover. |
-| 12 purity audit | Can the broker prove it adds no protocol logic of its own? | `sys_lockdown()` made real: seccomp-notify on Linux, `cap_enter()` on FreeBSD, installed after startup so libc initialisation is out of scope by construction. **Milestone M8, declared here rather than silently absent.** |
 
 ### Named non-goals
 
@@ -275,7 +274,7 @@ What brainstem does **not** prove, stated rather than omitted:
 - **Not a performance story.** One byte per `.`, and an interpreter spending
   millions of instructions between syscalls. Making it fast would mean
   batching, which would mean protocol logic in the broker, which is the one
-  thing tier 12 exists to forbid.
+  thing tiers 10a and 10b exist to forbid.
 - **No name resolution.** `getaddrinfo` loads NSS modules at runtime, defeats
   static linking, and would be the sole exemption in both audit tiers, so
   `connect` takes a literal address. This is a decision, not an omission.
@@ -304,7 +303,36 @@ Milestones, each ending in a committable unit green on **both** guests.
 | **M5** | **done.** Five net ops, IPv4 and IPv6. No `netecho` helper was needed: the fixture connects to itself, which removes the second process the plan assumed. Twenty of twenty three. |
 | **M6** | **done.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and a brainfuck program that runs a brainfuck program. |
 | **M7** | **done.** The tiers that needed all of it. Tier 3b (the header does not lie), tier 5a (metamorphic), tier 11 (mutation, 33 defects each caught by a named check). `--sort-readdir` and `--replay`. ABI.md frozen at 1.0, with the version checked against the binary and against the wire. No new opcodes. |
-| **M8** | the purity audit. |
+| **M8** | there is not one. See below. |
+
+### There is no M8, and the tier that wanted one is gone
+
+The plan ended at **M8 — the purity audit**: `sys_lockdown()` made real,
+seccomp-notify on Linux and `cap_enter()` on FreeBSD, installed immediately
+before the main loop. It was removed at M7 without being built, and the
+reasoning belongs here rather than in a commit nobody will find.
+
+**Tier 12 asked a question tiers 10a and 10b answer, and answer better.** The
+question was "can the broker prove it adds no protocol logic of its own". The
+measured tiers prove it by reading the objects and pinning each op's syscall
+multiset on both platforms; a lockdown proves nothing, it only *forbids*. That
+was already written down as a decision — "Capsicum cannot do the purity proof,
+it confines rather than observes" — and the consequence simply had not been
+followed through.
+
+**The second argument for it was the measurement window**, and `bscalls` took
+that over: its window opens at the fork, so everything before the loop is out
+of scope by construction, with no filter needed.
+
+**What was left was confinement**, which the named non-goals above have refused
+since the first commit — and which on the primary platform would have cost the
+project its purpose. After `cap_enter()` there is no `open()` by path and no
+`execve()` by path, so two of the three things brainstem exists to do stop
+working. The ABI would have had to grow the preopen model back, which §8.0
+removed for reasons that have not changed.
+
+A tier that is declared and absent is a debt. This one was also a tier whose
+premise had expired, and the honest thing was to say so.
 
 M2 is the milestone that validates or kills the idea, and it is cheap. If a
 standard brainfuck program cannot complete a round trip through a real

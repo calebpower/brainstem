@@ -290,8 +290,6 @@ static int det_selftest(void) {
     if (sys_platform() == 0) { printf("SELFTEST FAIL: the seam reports no platform\n"); return 1; }
     printf("selftest ok: the seam reports platform %u\n", (unsigned)sys_platform());
 
-    if (sys_lockdown() != BS_OK) { printf("SELFTEST FAIL: lockdown failed\n"); return 1; }
-    printf("selftest ok: sys_lockdown is callable (a no-op until M8)\n");
     return 0;
 }
 

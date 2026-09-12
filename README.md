@@ -69,8 +69,12 @@ That sweep found three gaps on its first run — `poll` had no fixture, `PIPE`
 was a status nothing produced, and the broker's `SIGPIPE` handling had nothing
 standing behind it.
 
-M8 makes `sys_lockdown()` real, and has a decision to make first: see the note
-on it in `src/sys.h`.
+There is no M8. The plan ended with a purity audit — `sys_lockdown()` made
+real, `cap_enter()` on FreeBSD — and it was deleted rather than built: the
+proof it was for is already measured by two other tiers, and what was left was
+confinement, which this project refuses on purpose. `CONVENTIONS.md` has the
+reasoning, and `HANDOFF.md` has the one version of the idea still worth
+building, written up as an exercise for whoever wants it.
 
 **It confines nothing, and that is the design.** A brainstem program sees the
 system its broker sees: paths are absolute or relative to the broker's working

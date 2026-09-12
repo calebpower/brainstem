@@ -12,9 +12,13 @@
 # loader, libc's startup and brainstem's own argument handling, none of which
 # is ABI surface and all of which varies with the C library, the hardening
 # flags and the phase of the moon. Measuring from the fork is not a
-# convenience: it is exactly the window sys_lockdown() will cover at M8, when
-# the filter is installed immediately before the loop. Pinning the same window
-# now means M8 changes what is enforced, not what is measured.
+# convenience: it is the boundary between what this ABI does and what the C
+# library does on its way to the first frame.
+#
+# It was chosen to match where sys_lockdown() would install a filter, so that
+# M8 would change what was ENFORCED and not what was measured. That lockdown
+# was deleted at M7 and the window is unchanged, because the reason above was
+# always the better one.
 #
 # WHAT IS PINNED IS THE OP SPECIFIC PART. The broker's own plumbing -- the
 # pipe reads and writes, the poll before each, the reaping and the exit -- is

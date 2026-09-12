@@ -36,6 +36,3 @@ bs_err sys_random(bs_u8 *buf, size_t n) {
     }
     return BS_OK;
 }
-
-/* M8. Frozen signature, documented no-op. */
-bs_err sys_lockdown(void) { return BS_OK; }

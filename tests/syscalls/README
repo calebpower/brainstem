@@ -25,14 +25,15 @@ than expected:
               because the window opens at the fork and the first random_bytes
               comes after it.
 
-              IT IS PINNED AS OBSERVED RATHER THAN ENGINEERED AWAY, for now.
-              Drawing a few bytes at startup would move all three calls out of
-              the window and make every random_bytes look alike, which is the
-              right thing to do -- but it is an M8 prerequisite rather than an
-              M3 tidy-up, because the reason it matters is that a lockdown
-              filter installed before the loop would otherwise have to permit
-              mmap and minherit forever for the sake of one lazy init. See
-              HANDOFF, "What is next".
+              IT IS PINNED AS OBSERVED RATHER THAN ENGINEERED AWAY, and it
+              stays that way. Drawing a few bytes at startup would move all
+              three calls out of the window and make every random_bytes look
+              alike; that was worth doing when a lockdown filter was planned,
+              because the filter would otherwise have had to permit mmap and
+              minherit forever for the sake of one lazy init. The filter was
+              deleted at M7 -- see HANDOFF, "the lockdown that was removed" --
+              and moving a real call out of a measured window to make the
+              picture tidier is the opposite of what this tier is for.
 
               Note what this costs on the primary platform: after that first
               call FreeBSD's generator is pure userspace, so rand.live and

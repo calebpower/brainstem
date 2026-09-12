@@ -198,17 +198,11 @@ int bs_broker_run(const struct bs_opts *o) {
 
     if (bs_child_start(&ch, o->interp, o->prog) != BS_OK) return BS_EXIT_INTERP;
 
-    /* Privilege is dropped HERE: after the child exists and before the first
-     * frame is read, so the filter measures the steady state ABI path by
-     * construction and libc's own startup is out of scope without anyone
-     * having to account for it. A no-op in v1 with its signature frozen, so
-     * M8 is an implementation rather than a refactor -- see sys.h. */
-    if (sys_lockdown() != BS_OK) {
-        fprintf(stderr, "brainstem: could not drop privilege\n");
-        bs_child_kill(&ch);
-        return BS_EXIT_INTERP;
-    }
-
+    /* A sys_lockdown() was called here from M3 to M7, dropping privilege
+     * after the child exists and before the first frame is read. It was a
+     * documented no-op the whole time and it is gone; see the note in sys.h
+     * for why, which is shorter than it sounds: everything it was for is
+     * measured somewhere else now. */
 
     for (;;) {
         unsigned char kind;

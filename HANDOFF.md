@@ -82,7 +82,8 @@ and they are worth telling apart because they call for different habits.
    two-guest gate is for.** The nearest thing available is a clang build of
    the objects purely to run the audit against -- it needs no interpreter, no
    fixtures and no kernel, only `nm` -- and it was not taken because it would
-   be a second definition of the toolchain. Worth weighing at M8.
+   be a second definition of the toolchain. It is written up as an exercise
+   in "the lockdown that was removed" below, beside the other one.
 
 Nothing has been guessed since the first of those, and nothing is pinned now
 that the program does not determine.
@@ -326,9 +327,16 @@ This table says which of them **exist**, and `tools/bstier.sh` checks it
 against `tests/run.sh` rather than anyone typing it.
 
 The hazard is larger here than it was in the sibling, which is why the tool
-arrived before the tiers did: brainstem declares eighteen tiers and has built
-four. A table that describes what you want and what you have in one column
-drifts the moment those differ, and here they differ almost everywhere.
+arrived before the tiers did: at M0 brainstem declared nineteen tiers and had
+built four. A table that describes what you want and what you have in one
+column drifts the moment those differ, and for six milestones they differed
+almost everywhere.
+
+They do not any more. All eighteen declared tiers are built as of M7, and the
+nineteenth was deleted rather than implemented -- so this table is, for the
+first time, a column of yes. That is the point at which such a table stops
+earning its keep and starts being a thing nobody reads, so: if a tier is ever
+added, add its row as `no` on the same commit, and let the tool nag.
 
 `run.sh lines` counts SOURCE lines, not checks: a loop is one line. `manual`
 means a practice rather than an automated check, and such a tier must have no
@@ -354,7 +362,6 @@ marker in the suite at all.
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 11 | the tables, the lanes and the frozen ABI version agree |
 | 11 | yes | 1 | mutation: 33 defects, each caught by a NAMED check |
-| 12 | no | 0 | purity audit, M8 |
 
 ## Why this project exists, since the name is not obvious
 
@@ -550,7 +557,7 @@ for.
   available, not taken here, would be a clang build of the objects purely to
   run the audit against. It needs no interpreter, no fixtures and no kernel,
   only `nm`, but it would be a second toolchain definition and that rule is
-  load bearing. Worth a think at M8.
+  load bearing. See "the lockdown that was removed" below.
 
 - **A MALFORMED LINE IN THE ALLOWLIST FAILS NOTHING.** While checking the
   above against the pasted FreeBSD surface, one of my own comments in
@@ -616,8 +623,12 @@ for.
   an `mmap` and a `minherit` marking the page `INHERIT_ZERO` so a fork cannot
   inherit a generator. A one-time lazy initialisation, landing inside the
   measured window only because the window opens at the fork and the first
-  `random_bytes` comes after it. It is pinned as observed; moving it out is an
-  M8 prerequisite and is listed there.
+  `random_bytes` comes after it. It is pinned as observed, and it STAYS
+  pinned as observed: warming the generator at startup was an M8 prerequisite,
+  M8 is gone, and moving a real call out of a measured window to make a
+  picture tidier is the opposite of what this tier is for. It would still be
+  the right thing to do the day somebody builds the filter in "the lockdown
+  that was removed".
 
   And note what FreeBSD's answer costs: once that generator is warm it is pure
   userspace, so `rand.live` and `rand.seeded` measure the same thing there. The
@@ -711,47 +722,31 @@ for.
   with SIGTERM, which does not flush. Once that lands, this copy's deltas are
   the two test knobs — `BFI_EOF` and `BFI_FLUSH` — which exist for tier 8 and
   have no reason to go upstream. Re-diff after it merges and update this note.
-- **Two tiers are declared and absent, and they are the last two.** Tier 12 is
-  M8's, and tier 11's op sweep covers only the ops that are BUILT -- which is
-  all of them today, and would silently stop being a sweep if an op were ever
-  declared and not built. bsmut's self test checks exactly that correspondence,
-  so it is not a soft spot so much as a thing to know.
+- **Every tier this project declares is built.** That is true for the first
+  time at M7, and it is true partly because one of them was DELETED rather
+  than implemented -- see "the lockdown that was removed" below, and do not
+  read the absence of a gap as the absence of a decision.
 
-  The sentence that used to be here said "every tier past 1 and 10c is declared
-  and absent", which was true at M0 and has been false since M3. It is recorded
-  because it is the shape this project keeps hitting: a sentence that described
-  the state of the tree, in the present tense, becoming a claim about it.
+  The remaining thing to know: tier 11's op sweep covers only the ops that are
+  BUILT, which is all of them today and would silently stop being a sweep if
+  an op were ever declared and not built. bsmut's self test checks exactly
+  that correspondence.
+
+  This bullet used to say "every tier past 1 and 10c is declared and absent",
+  which was true at M0 and false from M3 onward. It is worth recording as the
+  shape this project keeps hitting: a sentence describing the state of the
+  tree, written in the present tense, becoming a claim about it.
 
 ## What is next
 
 M0 through M7 are done. Every op is built, `ABI.md` is frozen at 1.0, and
-eighteen of the twenty tiers this project declares are running. **Everything
-below adds no opcodes either.**
+and every tier this project declares is running -- which is true for the
+first time, and is true partly because the last one was DELETED rather than
+built.
 
-1. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
-   `cap_enter()` on FreeBSD.
-
-   **THERE IS A DECISION TO MAKE BEFORE ANY CODE.** The note on `sys_lockdown`
-   in `src/sys.h` has it in full, and it is a project decision rather than a
-   platform one. After `cap_enter()` there is no `open()` by path at all, so
-   Capsicum requires exactly the preopen model that ABI.md §8.0 records
-   removing -- and that model is not coming back to satisfy a lockdown. So the
-   primary platform has three answers and none of them is free: confine the
-   filesystem and lose the reachability the whole redesign was for, confine
-   everything else and leave `open` ambient, or ship seccomp-notify on Linux
-   alone and say so in the tier. Read §8.0 before deciding.
-
-   **Prerequisite, found at M3 and worth doing first:** draw a few bytes
-   through `sys_random` at startup, before the fork, when no seed is in force.
-   FreeBSD's `arc4random_buf` allocates its generator state lazily on first
-   use — an `mmap` and a `minherit` — and a filter installed before the loop
-   would otherwise have to permit both, forever, so that one lazy
-   initialisation can happen inside the ABI path. Warming it moves those calls
-   outside the window the filter covers and makes every `random_bytes` alike.
-   The policy belongs in `det.c` rather than the seam, because the branch it
-   needs — warm only when unseeded — is the branch `det.c` already owns. It
-   will change `tests/syscalls/freebsd/rand.live.txt` to empty; re-pin with
-   `--record` on the guest and say so.
+1. **Nothing, in the sense of a planned milestone.** The plan ended at M8 and
+   M8 was deleted rather than built; the section below says why, and
+   `CONVENTIONS.md` carries the short version beside the milestone table.
 
 2. **Smaller things, none of them blocking.**
    - `bf/net/loopback.bf` and `bf/proc/drive.bf` have no pinned trace, because
@@ -767,6 +762,60 @@ below adds no opcodes either.**
      never written. Tier 8 runs the EOF and flush matrix against `bfi` alone,
      so what it proves is that the protocol survives every convention, not
      that two interpreters agree.
+
+### The lockdown that was removed, and the one version of it still worth building
+
+`sys_lockdown()` existed from M3 to M7 as a frozen no-op, so that M8 -- the
+purity audit, seccomp-notify on Linux and `cap_enter()` on FreeBSD -- would be
+an implementation rather than a refactor. It was deleted at M7 without ever
+being made real. Six lines of code, one declared-and-absent tier, and a
+milestone.
+
+**Every argument for it had been answered by something else.**
+
+*The proof.* Tier 12 asked "can the broker prove it adds no protocol logic of
+its own". `bsaudit` answers it by reading the objects and `bscalls` by pinning
+each op's syscall multiset on both platforms. A lockdown proves nothing; it
+forbids. The decision note below has said "Capsicum cannot do the purity
+proof, it confines rather than observes" since M3, and the consequence had
+simply not been followed through.
+
+*The window.* The other argument was that a filter installed immediately
+before the loop puts libc's startup out of scope by construction. `bscalls`
+took that over: its window opens at the fork.
+
+*What was left was confinement*, which the named non-goals refuse, and which
+on the primary platform would have cost the project its purpose. After
+`cap_enter()` there is no `open()` by path AND no `execve()` by path -- so
+`open` and `spawn` both stop working, which is two of the three things
+brainstem is for. The ABI would have had to grow the preopen model back.
+
+**AN EXERCISE FOR THE READER, and it is the good version of this idea.**
+
+There is a lockdown worth building, and it is not a confinement:
+
+> A Linux seccomp filter, in kill mode, **generated from the pinned syscall
+> multisets in `tests/syscalls/linux/`** -- permitting exactly the calls the
+> ABI has been measured to make, and nothing else. `openat` stays permitted,
+> so reachability is untouched; what goes away is everything the broker has
+> never once been observed doing.
+
+What makes it worth someone's afternoon is the generation step. The filter's
+input would be an artifact the suite already produces and already gates on,
+so an op that quietly grew a new syscall would fail the FILTER rather than a
+document -- the same move as `bsmut`'s coverage map, one level down. The
+existing tier 10a pin says "this op asked for exactly these"; the filter would
+make the kernel say it too.
+
+Two honest caveats for whoever takes it. It is **Linux only** -- Capsicum is
+not a syscall filter and FreeBSD has no equivalent, so the primary platform
+gets nothing, and this project has a standing rule against putting the weaker
+engineering there. And the baseline calls `bscalls` deliberately DROPS -- the
+pipe reads and writes, the poll, the reaping -- have to go back in, because
+the filter covers the whole process and not just the op specific part.
+
+Neither is a reason not to do it. They are reasons to write the tier's row
+saying what it covers, which is the habit this project has anyway.
 
 **The preopen flags are not on this list and will not be.** `--preopen-listen`
 and `--preopen-connect` were recorded here as pending against the
@@ -790,6 +839,12 @@ Each of these looked like a close call and is not.
   namespaces a broker exists to use. The proof wants a *tracer* — `ktrace` or
   DTrace on FreeBSD, `strace` or seccomp-notify on Linux — which is portable in
   a way seccomp-notify alone never was.
+
+  **This was decided at M3 and not acted on until M7**, which is the
+  interesting part: the sentence above is exactly why tier 12 could never have
+  done what it was declared to do, and it sat beside a declared tier 12 for
+  four milestones. A decision written down is not the same as a consequence
+  taken. See "the lockdown that was removed" above for the consequence.
 - **Little-endian**, matching bfsodium's `len{2} LE` convention across 33
   primitives, over the legibility argument for big-endian in hand-written hex.
   A program should never hold two byte orders in its head.

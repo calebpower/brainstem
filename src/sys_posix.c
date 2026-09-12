@@ -100,8 +100,10 @@ bs_err sys_errmap(int e) {
     case EINPROGRESS:   return BS_AGAIN;
 #ifdef ENOTCAPABLE
     /* FreeBSD only, and it arrives from a capability restricted descriptor.
-     * Mapped here rather than left to fall through to IO because M8 turns
-     * cap_enter() on and this becomes a common answer overnight. */
+     * Mapped here rather than left to fall through to IO because it can
+     * arrive without this broker doing anything: a descriptor handed over by
+     * a parent already in capability mode carries the restriction with it,
+     * and DENIED is the true answer where IO would be a shrug. */
     case ENOTCAPABLE: return BS_DENIED;
 #endif
     default:       return BS_IO;
@@ -140,8 +142,8 @@ void sys_init(void) {
      * from the mode and the broker's own identity with no extra syscall
      * (ABI.md section 7.19). Asking the kernel who we are on the first stat
      * instead would put a one-time lazy initialisation inside the window the
-     * syscall tier measures and the M8 filter will cover -- which is exactly
-     * the defect M3 found in FreeBSD's arc4random and recorded in HANDOFF.
+     * syscall tier measures -- which is exactly the defect M3 found in
+     * FreeBSD's arc4random and recorded in HANDOFF.
      * Finding it once is education; shipping it twice would be a habit. */
     self_uid = (unsigned long)geteuid();
     self_gid = (unsigned long)getegid();

@@ -65,34 +65,31 @@ bs_err sys_clock_mono(bs_time *out);
  * It also captures the broker's effective identity, which stat needs for its
  * advisory permission bytes. Anything the seam would otherwise work out
  * lazily on first use belongs here: a one-time initialisation on the ABI path
- * lands inside the window the syscall tier measures and the M8 filter will
- * cover, which is precisely the defect M3 found in FreeBSD's arc4random. */
+ * lands inside the window the syscall tier measures, which is precisely the
+ * defect M3 found in FreeBSD's arc4random. */
 void sys_init(void);
 
 /* Fill with randomness from the host. Never called when a seed is in force;
  * see det.h for that path, which issues no syscall at all. */
 bs_err sys_random(bs_u8 *buf, size_t n);
 
-/* Drop privilege to what the ABI actually needs.
+/* THERE IS NO sys_lockdown(), AND THAT IS A DECISION RATHER THAN AN OMISSION.
  *
- * A DOCUMENTED NO-OP IN v1, with the signature frozen so M8 is an
- * implementation rather than a refactor. seccomp-notify on Linux,
- * cap_enter() on FreeBSD -- and CAPSICUM IS NOW A CONFLICT RATHER THAN A
- * PLAN. After cap_enter() there is no open() by path at all, so a capability
- * mode process can only reach what it was handed in advance: the preopen
- * model, arrived at because the primary platform insisted.
+ * One lived here from M3 to M7: a frozen no-op, so that dropping privilege
+ * before the main loop would be an implementation rather than a refactor.
+ * It was removed at M7 because every argument for it had been answered by
+ * something else. The purity proof is measured -- tools/bsaudit.sh reads the
+ * objects and tools/bscalls.sh pins each op's syscall multiset on both
+ * platforms -- and bscalls fixes the measurement window at the fork, which is
+ * the other thing the lockdown was for.
  *
- * That model was removed before the ABI was frozen, for reasons ABI.md
- * section 8.0 sets out at length, and it is not coming back to satisfy a
- * lockdown. So M8 has to choose on the primary platform -- confine the
- * filesystem and lose reachability, confine everything else and leave open()
- * ambient, or ship seccomp-notify on Linux alone and say so. Whoever takes
- * M8 should read section 8.0 before deciding, because the answer is a
- * project question and not a platform one.
- *
- * Installed immediately before the main loop, so libc's own startup is out of
- * scope by construction rather than by anyone accounting for it. */
-bs_err sys_lockdown(void);
+ * What was left was confinement, which CONVENTIONS' named non-goals have
+ * refused since the first commit, and which on the primary platform would
+ * have cost the project its purpose: after cap_enter() there is no open() by
+ * path and no execve by path, so two of the three things brainstem is for
+ * stop working. See HANDOFF, "the lockdown that was removed", including the
+ * one version of it that is still worth building.
+ */
 
 /* ---- descriptors and directories --------------------------------------- */
 
