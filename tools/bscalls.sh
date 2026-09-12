@@ -144,6 +144,7 @@ time.frozen|--clock frozen=1700000000|bf/time/clock.bf
 rand.live||bf/rand/bytes.bf
 rand.seeded|--seed 000102030405060708090a0b0c0d0e0f|bf/rand/bytes.bf
 fs.roundtrip|%W|bf/fs/roundtrip.bf
+fs.refused|%W|bf/fs/refused.bf
 proc.drive|--op-timeout 5000 %P|bf/proc/drive.bf
 proc.refused|--op-timeout 5000 %P|bf/proc/refused.bf
 EOT
@@ -170,7 +171,6 @@ EOT
 # %W in the options is replaced with a directory created fresh for that case.
 observe_cases() {
     cat <<'EOT'
-fs.refused|%W|bf/fs/refused.bf
 EOT
 }
 

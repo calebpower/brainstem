@@ -1,0 +1,3 @@
+2 fstat
+3 open
+1 unlinkat

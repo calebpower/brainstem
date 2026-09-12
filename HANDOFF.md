@@ -161,13 +161,17 @@ twenty three, the metamorphic checks that span ops, freezing `ABI.md`,
 `--replay`, `--sort-readdir`, the capability questions from §8.1, and
 `sys_lockdown()` made real.
 
-### Tier 10a: five cases pinned, four being re-measured
+### Tier 10a: nine cases, both platforms, nothing guessed
 
-`fs.roundtrip`, `proc.drive` and `proc.refused` are pinned again on both
-platforms, from the gate's own measurements. `fs.refused` is in the report
-list because its fixture changed after those numbers were taken -- the
-`stat "/"` at the end became an `open` -- and measuring beats guessing.
-Linux reports it as 2 fstat, 3 open, 1 unlinkat.
+All nine cases are pinned on both platforms again, every one of them from a
+gate measurement rather than an inference. The report list is empty and
+`bscalls --report` says so rather than printing nothing.
+
+Two results worth keeping. **`fs.refused`, `proc.drive` and `proc.refused` are
+byte-identical on the two platforms**; only `fs.roundtrip` differs, and only by
+one `fstat` and the spelling of `getdents64` against `getdirentries`. And
+`brk` is not on any of them any more -- see the baseline comment in
+`bscalls.sh` for why glibc's heap growth was never this tier's business.
 
 The result worth keeping from the last round: **the proc cases measured
 identically on both platforms**, which nothing else non-empty in
@@ -259,7 +263,7 @@ marker in the suite at all.
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
 | 10 | yes | 10 | platform parity, against traces pinned in tests/trace/ |
-| 10a | yes | 1 | per-op syscall surface — eight cases pinned, fs.refused re-measuring |
+| 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 10 | the tables and the lane definitions agree |
 | 11 | manual | 0 | mutation, a discipline rather than a check |
@@ -359,6 +363,24 @@ accident, and the tree then claims coverage of a platform nobody provisioned
 for.
 
 ## Traps that have actually bitten
+
+- **"I am getting nondeterministic testing results" -- and the likeliest cause
+  was a pin, not a race.** For one commit (`7c50226`) tier 10 pinned the hello
+  reply's handle table, which reports what the broker's own stdin, stdout and
+  stderr ARE. Those depend on how the broker was invoked, so seven checks
+  would pass or fail according to how the harness happened to wire its stdio
+  that run. That is indistinguishable from a race at the report level, and it
+  was fixed by masking the table (`2a2fb7d`).
+
+  Three back-to-back gate runs after that landed showed no variation.
+
+  **The lesson is the diagnostic one.** Faced with "nondeterministic", the
+  instinct is to hunt for a race, and there WAS a real latent race to find --
+  the stream reads above, worth fixing and never reproduced. But a pinned
+  expectation that encodes something the program does not determine produces
+  exactly the same symptom, and this project had just made that mistake three
+  times in one session. Check what the failing tier PINS before hunting for
+  concurrency.
 
 - **A read returns UP TO n bytes, and two fixtures assumed exactly n.**
   `bf/proc/drive.poke` asked for eight bytes of the child's output and read a
