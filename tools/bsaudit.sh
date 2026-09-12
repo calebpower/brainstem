@@ -9,7 +9,7 @@
 # saying "no allocation on the ABI path" is a claim; an empty `nm -u` is a
 # measurement. tools/bscalls.sh is the other half.
 #
-# The seven rules, each named with the defect it exists to catch:
+# The eight rules, each named with the defect it exists to catch:
 #
 #   R1  every external symbol a unit references is on the allowlist, and
 #       every allowlist entry is referenced by something. Catches an op that
@@ -30,6 +30,11 @@
 #       calling another op, and any path to a handler that is not the table.
 #   R7  exactly one platform object is linked, and it is the one build.sh
 #       chose. Catches a stale object left behind by an earlier build.
+#   R8  a unit allowed to print is allowed the LOWERINGS of printing. The one
+#       rule here that reads no object: it lints the allowlist, because the
+#       compiler lowerings section is a thing somebody has to remember and
+#       nobody did for five milestones. Catches the next unit that learns to
+#       print, on the development host, instead of on the primary platform.
 #
 # Usage:  sh tools/bsaudit.sh              audit build/obj
 #         sh tools/bsaudit.sh --selftest   prove each rule fires
@@ -208,6 +213,40 @@ audit() {
         say_fail "R7 the linked seam is $seams but build.sh chose $want_seam"
     fi
 
+    # R8 -- a unit that is allowed to print is allowed the lowerings of
+    # printing.
+    #
+    # THIS IS A LINT ON THE ALLOWLIST AND NOT A MEASUREMENT. It is the only
+    # rule here that reads no object at all, and it exists because the
+    # "compiler lowerings" section of the allowlist is a thing somebody has to
+    # remember to extend every time a unit learns to print. Nobody did, for
+    # five milestones, and it surfaced the way it always does: green on the
+    # development host and on the container, red on the primary platform,
+    # after a round trip through somebody else's afternoon.
+    #
+    # A C compiler may rewrite a call whose format string has no conversions.
+    # clang turns fprintf(f, "text") into fwrite and fprintf(f, "\n") -- one
+    # character -- into fputc; printf("text") becomes puts, which is a
+    # reference to stdout as well. gcc under _FORTIFY_SOURCE lowers neither.
+    # So a unit permitted fprintf must be permitted all three of its
+    # lowerings, or it is permitted on exactly one of the two toolchains.
+    #
+    # It does not weaken R1. Those rows are optional, so nothing is required
+    # to appear; and a unit that was never allowed to print is not given any
+    # of this, which is where the forward rule still bites.
+    for _r8u in $(awk '$2 == "fprintf" { print $1 }' "$tmp/allow.req" | sort -u); do
+        for _r8s in fputs fwrite fputc; do
+            grep -qx "$_r8u $_r8s" "$tmp/allow" || say_fail \
+                "R8 $_r8u is allowed fprintf but not its lowering $_r8s (see the compiler lowerings section of the allowlist)"
+        done
+    done
+    for _r8u in $(awk '$2 == "printf" { print $1 }' "$tmp/allow.req" | sort -u); do
+        for _r8s in puts stdout; do
+            grep -qx "$_r8u $_r8s" "$tmp/allow" || say_fail \
+                "R8 $_r8u is allowed printf but not its lowering $_r8s (see the compiler lowerings section of the allowlist)"
+        done
+    done
+
     # A failure here is usually read on a guest nobody can log in to, so the
     # whole measurement goes out with it rather than just the verdict. Without
     # this, "R1 broker references fwrite" tells you one symbol when what you
@@ -249,6 +288,9 @@ EOT
         cat > "$d/allow" <<'EOT'
 # unit  symbol
 ops fprintf
+ops fputs ?
+ops fwrite ?
+ops fputc ?
 sys_posix clock_gettime
 EOT
     }
@@ -290,6 +332,9 @@ EOT
 
     base; echo "op_time U fopen" >> "$d/listing"; echo "op_time fopen ?" >> "$d/allow"
     expect 1 "an optional entry still does not exempt an op from R3"
+
+    base; echo "op_time U fputc" >> "$d/listing"; echo "op_time fprintf" >> "$d/allow"
+    expect 1 "R8 catches a unit allowed fprintf without the lowerings of it"
 
     base; echo "broker U malloc" >> "$d/listing"; echo "broker malloc" >> "$d/allow"
     expect 1 "R2 catches an allocation even when the allowlist permits it"

@@ -177,14 +177,33 @@ sys_proc _exit
 # Every one of these is a lowering of a call already listed above for the same
 # unit. A lowering of something NOT already listed would be a real dependency
 # wearing a disguise, and does not belong here.
+#
+# fputc is on the list because a ONE CHARACTER conversion-free format is
+# lowered further than a longer one: clang turns fprintf(f, "text") into
+# fwrite and fprintf(f, "
+") into fputc. src/replay.c has both shapes and
+# that is how this section came to be short by a unit.
+#
+# WHICH IS THE POINT OF RULE R8. This block is a thing somebody has to
+# remember to extend every time a unit learns to print, and it went five
+# milestones before anybody did. R8 reads this file and requires that a unit
+# allowed fprintf carries all three lowerings of it, so the next unit that
+# prints is a build failure on the development host rather than a round trip
+# through the primary platform.
 main puts ?
 main fputs ?
 main fwrite ?
+main fputc ?
 main stdout ?
 broker puts ?
 broker fputs ?
 broker fwrite ?
 child fputs ?
 child fwrite ?
+child fputc ?
 ops fputs ?
 ops fwrite ?
+ops fputc ?
+replay fputs ?
+replay fwrite ?
+replay fputc ?

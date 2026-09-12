@@ -477,6 +477,31 @@ for.
   intermittent hang in a fixture that has always worked. Any fixture reading
   from a pipe or a socket should be read with this in mind.
 
+- **THE COMPILER LOWERINGS SECTION IS A THING SOMEBODY HAS TO REMEMBER, AND
+  IT WENT FIVE MILESTONES BEFORE ANYBODY DID.** M7 came back from
+  `freebsd-15.1` with tier 10b red and one cause: `src/replay.c` prints five
+  diagnostics whose format strings have no conversions, clang lowers those to
+  `fwrite` and `fputc`, gcc does not, and the allowlist had no optional rows
+  for the new unit.
+
+  This is failure shape 1 exactly -- a FACT written down instead of a
+  MECHANISM -- and what makes it worth recording is that the mechanism already
+  existed. The `?` rows were built at M3 for this precise defect, the section
+  comment in `tests/audit/allow.txt` says so at length, and I added a unit that
+  prints without extending it. A mechanism nobody is reminded of is a fact.
+
+  So there is a reminder now: **R8** lints the allowlist rather than the
+  objects -- a unit allowed `fprintf` must carry `fputs`, `fwrite` and `fputc`
+  as optional rows, and one allowed `printf` must carry `puts` and `stdout`.
+  It reads no object, so it says the same thing on both platforms, and the
+  next unit that learns to print fails on the development host instead of on
+  the guest.
+
+  The one-character case is worth knowing on its own: clang lowers
+  `fprintf(f, "text")` to `fwrite` and `fprintf(f, "
+")` to **`fputc`**,
+  which is a different symbol again. replay.c has both shapes.
+
 - **A gate you cannot log in to has to carry its own diagnosis.** M3 came back
   from `freebsd-15.1` with two failing tiers, 10a and 10b. Both of them had
   computed the exact answer -- the expected multiset beside the observed one,
