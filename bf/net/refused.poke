@@ -66,6 +66,7 @@ READ 3
 #   are streams.
 EMIT 0a 08 00 04 00 01 00 01 00 00 00
 READ 3
+#   close the listener
 EMIT 0c 04 00 04 00 01 00
 READ 3
 #   exit  op 02, len 1, code 0

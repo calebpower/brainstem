@@ -44,6 +44,7 @@ READ 7
 #   from the handle's kind
 EMIT 10 06 00 01 00 00 00 00 00
 READ 3
+#   close the process handle for the child that could not exec
 EMIT 0c 04 00 04 00 00 00
 READ 3
 #   exit  op 02, len 1, code 0

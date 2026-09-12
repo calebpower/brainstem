@@ -177,10 +177,14 @@ fixture is brainfuck *at all*, and that is checked on the committed bytes by a
 lint rather than promised by its author. The rule survives, restated for what
 it actually protects.
 
-A fixture's header cites the ABI section its hex came from and states the
-frame it emits; `tools/bsframe --decode` proves the header describes the bytes
-the file actually sends. A comment that lies is the sharpest risk in a
-generated corpus, and no output tier can see it.
+A fixture's header cites the ABI section its hex came from, and every frame in
+it carries an indented comment naming the op it sends. `tools/bsframe skeleton`
+reads back what the frames ARE -- opcode, declared length, bytes actually
+emitted -- and `tools/bspoke.sh` asks whether the prose agrees, against the op
+table and the status table rather than against a copy of them. A comment that
+lies is the sharpest risk in a generated corpus, and no output tier can see
+it: a header saying `open` over a frame that stats would pass every other
+check in the suite.
 
 ---
 
@@ -237,7 +241,7 @@ see.
 | 2 the program is still brainfuck | Has a fixture stopped being standard brainfuck? | `bsbf --portable` on every committed `.bf`: only `><+-.,[]` and whitespace. §0's claim, mechanised. |
 | 3 fixture regeneration | Is the committed brainfuck what its skeleton says? | Byte-for-byte `bfgen` of the `.poke`. This is what licenses the skeleton to be the review artifact. |
 | 3a fixture legibility | Can it be reviewed at all? | A header naming the op, citing the ABI section, and stating the expected reply length. A `.bf` carries no comments by design, so the skeleton is the only place review can happen. |
-| 3b the header does not lie | Does it emit what it claims? | `bsframe --decode` renders the skeleton's `EMIT` bytes and the suite compares that to the header. |
+| 3b the header does not lie | Does it emit what it claims? | `bsframe skeleton` reports each frame's opcode, declared length and emitted bytes; `bspoke.sh` checks those against `--dump-abi` and `errs.def`, and checks that every frame is annotated with the op it actually sends. |
 | 4 frame codec in isolation | Does the codec hold at its edges? | Driven from pinned vectors with no process, no descriptor and no kernel: zero length, maximum length, one over, a header split across reads, a length that overruns. Cross-checked against `bsframe`, written independently from ABI.md — two encoders, one spec. |
 | 5 per-op round trip | Does each op reach the OS and come back? | One fixture per op through a real interpreter over real pipes. |
 | 6 error paths | Is every declared status reachable? | A fixture per status, including a **stale** handle whose slot was recycled. The set of statuses declared but never produced is pinned, exactly as the sibling pins the files declaring no interface: a status nobody can reach is either dead spec or an untested branch, and both should be visible. |

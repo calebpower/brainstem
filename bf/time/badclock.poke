@@ -16,9 +16,10 @@ EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
 READ 107
 #   clock_now  op 03, len 1, clock id 2, which is not a clock
 EMIT 03 01 00 02
-#   status 06 INVAL, len 0, and nothing after it
+#   the reply is INVAL 06, len 0, and nothing after it
 READ 3
-#   still in step: a second, valid request is answered normally
+#   clock_now again, id 0: still in step, and a valid request after a
+#   refused one is answered normally
 EMIT 03 01 00 00
 READ 15
 #   exit  op 02, len 1, code 0

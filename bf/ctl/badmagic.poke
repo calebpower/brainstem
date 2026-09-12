@@ -3,5 +3,6 @@
 # "BSTX" rather than "BSTM". Whatever is on the far end of the pipe is not a
 # brainstem program, so the broker refuses rather than trying to interpret
 # the rest of the frame.
+#   hello  op 01, len 10, magic "BSTX" rather than "BSTM"
 EMIT 01 0a 00 42 53 54 58 01 00 00 00 00 00
 READ 3

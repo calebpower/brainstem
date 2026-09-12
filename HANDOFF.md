@@ -262,12 +262,12 @@ marker in the suite at all.
 
 | tier | built | run.sh lines | what it is |
 |---|---|---|---|
-| 0 | yes | 7 | checker self-tests |
+| 0 | yes | 8 | checker self-tests |
 | 1 | yes | 17 | interpreter self-test, all three EOF modes |
 | 2 | yes | 1 | the program is still brainfuck |
 | 3 | yes | 1 | fixture regeneration |
 | 3a | yes | 3 | fixture legibility, and the expander knows no ABI |
-| 3b | no | 0 | the header does not lie — needs bsframe --decode wiring |
+| 3b | yes | 1 | the header does not lie: tools/bspoke.sh, six rules |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
 | 5 | yes | 21 | per-op round trip |
 | 6 | yes | 17 | error paths |

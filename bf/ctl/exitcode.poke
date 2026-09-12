@@ -4,6 +4,7 @@
 # "exactly one reply per request" with no special case. That invariant is
 # the whole deadlock proof, so it has no exceptions -- not even for the op
 # whose entire job is to end the conversation.
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
 EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
 READ 107
 #   exit 3

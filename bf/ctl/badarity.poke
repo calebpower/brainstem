@@ -6,5 +6,7 @@
 # deadlock but a program that under reads a reply and shifts every frame
 # after it, and an exact length turns that into a loud failure within a
 # frame or two.
+#   hello  op 01, declaring len 9 for a payload the op table says is exactly
+#   10.  The only frame in this tree the table would refuse.
 EMIT 01 09 00 42 53 54 4d 01 00 00 00 00
 READ 3

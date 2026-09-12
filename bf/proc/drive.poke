@@ -92,6 +92,8 @@ READ 7
 #   wait again: idempotent after reaping, from the cached status
 EMIT 10 06 00 08 00 00 00 00 00
 READ 7
+#   close the pipe end and then the process handle.  Closing a process
+#   handle stops tracking the child; it does not kill it.
 EMIT 0c 04 00 06 00 00 00
 READ 3
 EMIT 0c 04 00 08 00 00 00

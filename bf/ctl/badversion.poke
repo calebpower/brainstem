@@ -5,5 +5,6 @@
 # the BROKER that compares, not the program -- a numeric comparison is cheap
 # in C and expensive in brainfuck, and a program that got it wrong would
 # misbehave in a way nobody could debug.
+#   hello  op 01, len 10, asking for major version 9
 EMIT 01 0a 00 42 53 54 4d 09 00 00 00 00 00
 READ 3

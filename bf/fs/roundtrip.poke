@@ -76,6 +76,7 @@ READ 10
 #   is status END and a zero length rather than a payload to parse
 EMIT 14 06 00 04 00 02 00 00 00
 READ 3
+#   close  op 0c, handle 0x00020004, which closes the directory walk with it
 EMIT 0c 04 00 04 00 02 00
 READ 3
 #   exit  op 02, len 1, code 0

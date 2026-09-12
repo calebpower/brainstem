@@ -75,6 +75,7 @@ READ 3
 #   as 0x00010004.
 EMIT 11 09 00 ff ff ff ff 41 00 00 00 2f
 READ 7
+#   close the root handle
 EMIT 0c 04 00 04 00 01 00
 READ 3
 #   exit  op 02, len 1, code 0

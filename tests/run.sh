@@ -82,6 +82,7 @@ run "bsbf self-test" ./build/bsbf --selftest
 run "brainstem self-test" ./build/brainstem --selftest
 run "bsaudit self-test" sh tools/bsaudit.sh --selftest
 run "bscalls self-test" sh tools/bscalls.sh --selftest
+run "bspoke self-test" sh tools/bspoke.sh --selftest
 
 # TIER 10c
 echo
@@ -410,6 +411,21 @@ run "no fixture depends on a stream read returning more than one byte" sh -c '
 run "the expander knows no opcode and no op name" sh -c '
     body=$(grep -v "^[[:space:]]*#" tools/bfgen.sh)
     ! printf "%s" "$body" | grep -Eqi "hello|ABI\.md|opcode|0x0[1-9]|BSTM"'
+
+# TIER 3b
+echo
+echo "== tier 3b: the header does not lie =="
+# Declared at M2 and missing until M7, and the gap was a real one: tier 3
+# proves a .bf is the expansion of its skeleton and tier 2 proves it is
+# brainfuck, but NOTHING could see whether the skeleton's prose described its
+# hex. A header saying "open" over a frame that stats would have passed every
+# check in this file, and the prose is the only artifact a reviewer has.
+#
+# Six rules, and tools/bspoke.sh names each one it checked. Two of them (P5
+# and P6) are pins on this TREE rather than on a platform, because the honest
+# alternative was an exemption, and an exemption keeps passing after the thing
+# it excused has changed.
+run "every fixture comment describes the frame beneath it" sh tools/bspoke.sh
 
 # TIER 5
 echo
