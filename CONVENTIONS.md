@@ -253,7 +253,7 @@ see.
 | 10a per-op syscall surface | Does each op do exactly what it claims? | `bscalls` diffs the observed syscall multiset against a pinned one, via `ktrace` on FreeBSD and `strace` on Linux. This **measures** rather than trusting the source, and it works on the primary platform, which hand-written syscall wrappers never would. |
 | 10b the seam is narrow | Has the platform surface leaked upward? | `bsaudit`: per-object undefined-symbol allowlists, each op symbol referenced exactly once, `errno` only in the seam files, namespace macros only in two. |
 | 10c the tables agree | Do the spec, the code and the configuration describe each other? | `bsabi` diffs `--dump-abi` against ABI.md both directions; the suite checks the toolchain has one definition, the build has one definition, and the guests reaper will run are the ones `guest-setup.sh` knows. |
-| 11 mutation | Would the suite catch the bug it claims to? | Break each handler and each rule, confirm the named tier fails, restore. |
+| 11 mutation | Would the suite catch the bug it claims to? | `tools/bsmut.sh` copies the tree, breaks one thing, relinks the broker alone, and runs the suite filtered to THE CHECK THAT MUTATION IS SUPPOSED TO BREAK -- which must then fail. One mutation per built op plus the invariants the ABI rests on. Naming the check makes the table a coverage map rather than a pass/fail: a survivor says which op has lost its cover. |
 | 12 purity audit | Can the broker prove it adds no protocol logic of its own? | `sys_lockdown()` made real: seccomp-notify on Linux, `cap_enter()` on FreeBSD, installed after startup so libc initialisation is out of scope by construction. **Milestone M8, declared here rather than silently absent.** |
 
 ### Named non-goals

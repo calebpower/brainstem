@@ -1,0 +1,65 @@
+# poll.poke -- ask whether a pipe is readable before and after it is written.
+#
+# THE OP THAT HAD NO FIXTURE. Tier 5 claims "one fixture per op" and that was
+# true of twenty two of the twenty three: poll was built at M4 and nothing in
+# this tree ever sent one. It was found by tier 11, which mutates each op in
+# turn and requires some named check to notice -- and for poll there was no
+# check to name.
+#
+# The shape is the smallest one that means anything: a pipe with nothing in
+# it is not readable, and the same pipe with a byte in it is. A poll that
+# always answered "ready", or always answered "not ready", fails one of those
+# two and not the other.
+#
+# poll is the flagship parseability decision of this ABI, which is why its
+# reply looks the way it does: ONE BYTE PER CONDITION, each exactly 0 or 1,
+# positional in the order of the request. Brainfuck has no bitwise
+# instruction -- bfsodium builds XOR8 out of eight halvings -- so a POSIX
+# revents bitmask would cost a bit decomposition per descriptor per poll.
+# Four bytes where one would do, and it is not close.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.13, 7.14 and 7.10.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 107
+#   pipe  op 0e, flags 0.  Handle 4 is the read end and 5 the write end; 1, 2
+#   and 3 are always the broker's stdio.
+EMIT 0e 02 00 00 00
+READ 11
+#   poll  op 0d, len 11: timeout 0 -- return immediately -- then nfds 1, then
+#   handle 4, want_read 1, want_write 0.  Nothing has been written, so the
+#   reply is nready 0, a reserved byte, and four zeros: not readable, not
+#   writable, no hangup, no error.  Nine bytes.
+EMIT 0d 0b 00 00 00 00 00 01 04 00 00 00 01 00
+READ 9
+#   write  op 0b, handle 5, flags 0, one byte "h"
+EMIT 0b 07 00 05 00 00 00 00 00 68
+READ 5
+#   poll again, the same frame.  Now nready is 1 and the readable byte is 1.
+EMIT 0d 0b 00 00 00 00 00 01 04 00 00 00 01 00
+READ 9
+#   read  op 0a, handle 4, n 1, flags 0 -- one byte at a time, because a read
+#   returns UP TO n bytes and one is the only size a stream read is
+#   deterministic at
+EMIT 0a 08 00 04 00 00 00 01 00 00 00
+READ 4
+#   close  op 0c, handle 5, so the read end sees end of input
+EMIT 0c 04 00 05 00 00 00
+READ 3
+#   poll a third time, on a pipe whose only writer is gone.
+#
+#   THE REPLY TO THIS ONE IS NOT ASSERTED BYTE FOR BYTE, on purpose. A pipe
+#   at end of input raises POLLHUP on both platforms and the two kernels do
+#   not agree about whether POLLIN comes with it. That is a fact about
+#   kernels, not about this program, and a parity tier may only pin bytes the
+#   program determines. What IS asserted is that the reply is nine bytes like
+#   the other two, so the conversation stays in step either way.
+EMIT 0d 0b 00 00 00 00 00 01 04 00 00 00 01 00
+READ 9
+#   close  op 0c, handle 4
+EMIT 0c 04 00 04 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

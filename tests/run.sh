@@ -76,8 +76,32 @@ trap 'rm -rf "$BS_TMP"; rm -f "$bs_out"' EXIT
 # A gate that runs somewhere you cannot log in has to carry its own
 # diagnosis. Output is still hidden on success, because 132 passing checks
 # that each print a paragraph is a log nobody reads.
+#
+# BS_ONLY narrows the suite to the checks whose label contains one of the
+# patterns in it, and BS_NOBUILD skips the build. The patterns are separated
+# by "|" and not by spaces, because a check label is a sentence: a space
+# separated BS_ONLY of "the handshake round trips" matched seventy six checks
+# on the word "the", which is a filter that reports a pass having asked
+# nothing. Both exist
+# for tools/bsmut.sh, which runs this file once per mutation and needs the
+# ONE check that mutation is supposed to break -- thirty one full suite runs
+# would be most of tier 11's cost and none of its meaning.
+#
+# The failure mode of BS_ONLY is the safe one: a pattern that matches nothing
+# runs no checks, the suite passes with a count of zero, and bsmut reports the
+# mutant as having SURVIVED. A filter that quietly matched everything would
+# have been the dangerous direction.
 run() {  # run LABEL CMD...
     label="$1"; shift
+    if [ -n "${BS_ONLY:-}" ]; then
+        bs_keep=0
+        bs_ifs=$IFS; IFS='|'
+        for bs_pat in $BS_ONLY; do
+            case "$label" in *"$bs_pat"*) bs_keep=1 ;; esac
+        done
+        IFS=$bs_ifs
+        [ "$bs_keep" = 1 ] || return 0
+    fi
     if "$@" > "$bs_out" 2>&1; then
         echo "PASS $label"; pass=$((pass+1))
     else
@@ -89,7 +113,7 @@ run() {  # run LABEL CMD...
 echo "== build =="
 # tools/build.sh is the only thing in this repository that invokes a compiler,
 # and the check below proves it stays that way.
-sh tools/build.sh >/dev/null
+if [ -z "${BS_NOBUILD:-}" ]; then sh tools/build.sh >/dev/null; else echo "(BS_NOBUILD: using the binaries already here)"; fi
 bfi=$repo/build/bfi
 echo "built"
 
@@ -106,6 +130,7 @@ run "brainstem self-test" ./build/brainstem --selftest
 run "bsaudit self-test" sh tools/bsaudit.sh --selftest
 run "bscalls self-test" sh tools/bscalls.sh --selftest
 run "bspoke self-test" sh tools/bspoke.sh --selftest
+run "bsmut self-test" sh tools/bsmut.sh --selftest
 
 # TIER 10c
 echo
@@ -416,12 +441,13 @@ run "every skeleton has a header naming what it does" sh -c '
 # the answer was always "both", through forty runs under deliberate CPU load.
 # On a loaded single processor guest it is not.
 #
-# Everything in bf/proc and bf/net reads from a stream, so the rule here has
-# no exceptions and needs to know nothing about which handle is which: every
-# read op in those two directories asks for exactly one byte. A program that
-# wants more has to loop, which is what talking to a stream means anyway.
+# Everything in bf/proc, bf/net and bf/io reads from a stream, so the rule
+# here has no exceptions and needs to know nothing about which handle is
+# which: every read op in those three directories asks for exactly one byte. A
+# program that wants more has to loop, which is what talking to a stream means
+# anyway.
 run "no fixture depends on a stream read returning more than one byte" sh -c '
-    bad=$(grep -h "^EMIT 0a " bf/proc/*.poke bf/net/*.poke \
+    bad=$(grep -h "^EMIT 0a " bf/proc/*.poke bf/net/*.poke bf/io/*.poke \
           | grep -vE "^EMIT 0a 08 00( [0-9a-f]{2}){4} 01 00 ") || true
     if [ -n "$bad" ]; then echo "$bad"; exit 1; fi
     exit 0'
@@ -622,6 +648,33 @@ run "wait repeats itself after the child is reaped" sh -c '
     got=$( (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
           | grep -c "^brainstem: < 00 len=4 01000000$")
     test "$got" = 2'
+# POLL, which had no fixture at all until tier 11 asked for one. Tier 5 has
+# claimed "one fixture per op" since M4 and it was true of twenty two of the
+# twenty three; poll was built and nothing in this tree ever sent one. A
+# mutation sweep found it by having no check to name.
+#
+# The two replies asserted here are the whole property: a pipe with nothing
+# in it is not readable, and the same pipe with a byte in it is. A poll that
+# always said "ready", or always said "not ready", fails exactly one of them.
+run "poll answers not-readable, then readable, on the same handle" sh -c '
+    got=$(./build/brainstem --trace -- ./build/bfi bf/io/poll.bf </dev/null 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < 00 len=6 //p" | head -2 | tr "\n" " ")
+    test "$got" = "000000000000 010001000000 " || { echo "got [$got]"; exit 1; }
+    exit 0'
+# The third poll is on a pipe whose only writer is gone, and its bytes are NOT
+# asserted: POLLHUP arrives on both platforms and the two kernels disagree
+# about whether POLLIN comes with it. That is a fact about kernels rather than
+# about the program, and a parity tier may only pin what the program
+# determines. What must hold either way is that the reply is the same SIZE, so
+# the conversation stays in step -- which is what the fixture running to
+# completion proves.
+run "and a poll on a hung-up pipe keeps the conversation in step" sh -c '
+    out=$(./build/brainstem --trace -- ./build/bfi bf/io/poll.bf </dev/null 2>&1 >/dev/null)
+    test "$(printf "%s\n" "$out" | grep -c "^brainstem: < 00 len=6 ")" = 3 \
+        || { echo "$out"; exit 1; }
+    printf "%s\n" "$out" | tail -1 | grep -q "^brainstem: < 00 len=0$" \
+        || { echo "the program did not reach its exit frame"; exit 1; }
+    exit 0'
 run "pipe yields a read end and a write end, in that order" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
@@ -668,14 +721,24 @@ run "a seed changes its own echo and the random bytes, and nothing else" sh -c '
     exit 0'
 # THE ONE THE SORTED WALK EXISTS TO MAKE TRUE. Two directories with the same
 # four names, built in opposite orders, must produce the same conversation.
+#
+# THE cd IS INSIDE THE SUBSHELL WITH THE RUN, and the first version of this
+# check had it in a subshell of its own -- so both halves ran in the
+# repository root instead, walked the same tree, desynced identically, and
+# COMPARED EQUAL. It passed for two commits having asked nothing at all. A
+# metamorphic check compares two runs, so it is the one shape that passes
+# perfectly when both runs are wrong in the same way; the guard is that at
+# least one of the two must also be pinned somewhere, and the walk is.
 run "a sorted walk does not depend on the order the entries were made in" sh -c '
     rm -rf "$BS_TMP/walk" && mkdir -p "$BS_TMP/walk"
-    (cd "$BS_TMP/walk" && : > d && : > b && mkdir c && : > a)
-    eval "$BS_WALK" | sed "$BS_NORM" > "$BS_TMP/m1"
+    (cd "$BS_TMP/walk" && : > d && : > b && mkdir c && : > a && eval "$BS_WALK") \
+        | sed "$BS_NORM" > "$BS_TMP/m1"
     rm -rf "$BS_TMP/walk" && mkdir -p "$BS_TMP/walk"
-    (cd "$BS_TMP/walk" && : > a && mkdir c && : > b && : > d)
-    eval "$BS_WALK" | sed "$BS_NORM" > "$BS_TMP/m2"
-    diff -u "$BS_TMP/m1" "$BS_TMP/m2"'
+    (cd "$BS_TMP/walk" && : > a && mkdir c && : > b && : > d && eval "$BS_WALK") \
+        | sed "$BS_NORM" > "$BS_TMP/m2"
+    diff -u "$BS_TMP/m1" "$BS_TMP/m2"
+    # and it must be the walk that was compared, not a desync that matched
+    grep -q "< 00 len=5 0201000063" "$BS_TMP/m1"'
 # And the flag must not change a walk that has nothing to sort. roundtrip
 # enumerates a directory of exactly one entry, where every order is the same
 # order, so the two traces have to agree byte for byte.
@@ -827,12 +890,36 @@ run "every process refusal lands on its own status, in order" sh -c '
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
     got=$( (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/refused.bf" </dev/null) 2>&1 >/dev/null \
           | sed -n "s/^brainstem: < \(..\) .*/\1/p" | tr "\n" " ")
-    want="00 06 06 03 00 00 03 00 00 "
+    want="00 06 06 06 03 00 00 03 00 00 "
     if [ "$got" != "$want" ]; then
         echo "wanted: $want"
         echo "got:    $got"
         exit 1
     fi
+    exit 0'
+# PIPE 07, which was declared at M1 and produced by nothing until M7. Tier 6
+# has claimed "every status reachable" that whole time, and a mutation sweep
+# is what asked which check was standing behind this one.
+#
+# The fixture holds BOTH ends of the pipe and closes the read end, so the
+# write that follows cannot succeed and cannot race. A program that merely
+# stopped reading and exited would be a race: the reply fits in the pipe
+# buffer, so whether the write fails depends on whether the interpreter has
+# finished exiting.
+run "writing into a pipe with no reader is PIPE, and the program carries on" sh -c '
+    got=$(./build/brainstem --trace -- ./build/bfi bf/io/pipe.bf </dev/null 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < \(..\) .*/\1/p" | tr "\n" " ")
+    test "$got" = "00 00 00 07 00 00 " || { echo "got [$got]"; exit 1; }
+    exit 0'
+# AND THE BROKER SURVIVES IT. main.c ignores SIGPIPE in one line, and without
+# that line this run does not report an error -- it dies, of a signal, halfway
+# through answering, with no diagnosis at all. That is the worst failure shape
+# this program has and it was one line away from M2 onward, with nothing able
+# to see it.
+run "and the broker survives it rather than dying of SIGPIPE" sh -c '
+    ./build/brainstem -- ./build/bfi bf/io/pipe.bf </dev/null >/dev/null 2>&1
+    rc=$?
+    test $rc -eq 0 || { echo "the broker exited $rc (141 means SIGPIPE killed it)"; exit 1; }
     exit 0'
 run "a child that could not exec is reported as exit 127" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
@@ -1180,7 +1267,35 @@ echo "== tier 10b: the seam is narrow =="
 # emitted rather than the source it was given.
 run "the external surface is the one tests/audit/allow.txt declares" sh tools/bsaudit.sh
 
+# TIER 11
+echo
+echo "== tier 11: would these checks catch the bug they claim to? =="
+# Declared at M0 as "a discipline rather than a check" and automated at M7.
+# Every tier above asks whether this program is right; this one asks whether
+# the CHECKS are worth anything, and it is the only tier that can.
+#
+# tools/bsmut.sh copies the tree, breaks one thing with sed, relinks the
+# broker alone, and runs THIS FILE with BS_ONLY set to the check that
+# mutation is supposed to break -- which must then fail. Thirty three
+# mutations: one per built op, plus the invariants the ABI rests on.
+#
+# Naming the check is the point. The table in that file is a coverage map,
+# machine-verified, and it has already earned its keep three times: `poll`
+# had no fixture at all, PIPE 07 was a status nothing produced, and the
+# SIGPIPE ignore in main.c had nothing standing behind it.
+#
+# IT IS SKIPPED INSIDE A FILTERED RUN, which is what bsmut's own children are.
+# Without that this file would invoke the tool that invokes this file.
+#
+# It is also the most expensive tier here by a wide margin -- around seventy
+# seconds against ten for everything else -- and that is the right trade
+# exactly once per gate.
+if [ -z "${BS_ONLY:-}" ]; then
+    run "every deliberate defect is caught by the check named for it" sh tools/bsmut.sh
+fi
+
 echo
 echo "== summary =="
+if [ -n "${BS_ONLY:-}" ]; then echo "(BS_ONLY was set: this is a FILTERED run, not the suite)"; fi
 echo "passed $pass, failed $fail on $(uname -srm)"
 [ "$fail" -eq 0 ] || exit 1

@@ -24,6 +24,14 @@ READ 3
 #   this ABI can express.
 EMIT 0f 0f 00 ff ff ff ff 00 00 00 00 00 00 03 00 62 66 69
 READ 3
+#   spawn with an EMPTY path -- INVAL 06, and this is the one caller that can
+#   reach src/path.c with a zero length: the filesystem ops refuse an empty
+#   path a layer higher, in path_of, so the rule in path.c is reachable from
+#   here alone. It had no test until a mutation sweep asked which check was
+#   standing behind it and the answer was none.
+EMIT 0f 11 00 ff ff ff ff 00 00 00 01 00 00 00 00
+EMIT 03 00 62 66 69
+READ 3
 #   spawn whose descriptor map names handle 0x63, which was never issued --
 #   BADF 03. A program can only hand a child a descriptor it holds, and the
 #   generation check means it cannot hand over one it closed.

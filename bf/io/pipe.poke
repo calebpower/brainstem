@@ -1,0 +1,46 @@
+# pipe.poke -- write into a pipe nobody is reading, and get told so.
+#
+# TWO THINGS IN THIS TREE HAD NO TEST AND THIS FIXTURE IS BOTH OF THEM.
+#
+# The first is the status. PIPE 07, "peer is gone", was declared in errs.def
+# at M1 and nothing ever produced one: tier 6 claims every status is
+# reachable and it was wrong about this one. Every other fixture that writes
+# has somebody listening.
+#
+# The second is the broker's SIGPIPE handling, which is a single line in
+# main.c -- signal(SIGPIPE, SIG_IGN) -- and which nothing could see. Delete
+# it and the broker does not report an error; it DIES, of a signal, halfway
+# through answering, with no diagnosis at all. That is the worst failure
+# shape this program has, and it was one line away at every moment since M2.
+#
+# The reason it is testable here and not anywhere else is that this program
+# holds BOTH ends. Closing handle 4 closes the read end for good -- nobody
+# else has a copy, because everything the broker opens is close-on-exec and
+# there is no child here -- so the write that follows cannot succeed and
+# cannot race. An earlier attempt used a program that stopped reading and
+# exited, and that IS a race: the broker's reply fits in the pipe buffer, so
+# whether the write fails depends on whether the interpreter has finished
+# exiting, which is a scheduling question.
+#
+# Frames transcribed by hand from ABI.md sections 3, 4, 7.11, 7.12 and 7.14.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 107
+#   pipe  op 0e, flags 0.  Handle 4 is the read end and 5 the write end.
+EMIT 0e 02 00 00 00
+READ 11
+#   close  op 0c, handle 4 -- the read end, and the only one there is
+EMIT 0c 04 00 04 00 00 00
+READ 3
+#   write  op 0b, handle 5, flags 0, one byte "h" -- PIPE 07.  Recoverable,
+#   like every other refusal: the error reply carries no payload, so the
+#   program reads exactly three bytes and the conversation is still in step.
+EMIT 0b 07 00 05 00 00 00 00 00 68
+READ 3
+#   and the proof that it is in step: close  op 0c, handle 5, which works
+EMIT 0c 04 00 05 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

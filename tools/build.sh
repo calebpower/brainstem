@@ -11,6 +11,18 @@
 # failure. tests/run.sh checks that no `cc` line has crept in beside this one.
 #
 # Usage:  sh tools/build.sh
+#         sh tools/build.sh --relink UNIT     recompile one src/UNIT.c, relink
+#
+# --relink exists for tier 11, which rebuilds the broker once per mutation and
+# would otherwise spend its whole runtime recompiling twenty one unchanged
+# translation units. It is a narrow door and it is deliberately here rather
+# than in tools/bsmut.sh: a mutation tester that ran its own cc line would be
+# a second definition of the build, in the repository whose whole first
+# paragraph is about not having one.
+#
+# It refuses unless a full build has already produced build/obj, because an
+# incremental build over objects from some other source state is how a test
+# comes to measure a binary nobody described.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -32,6 +44,43 @@ CC=${CC:-cc}
 CFLAGS=${CFLAGS:-"-O2 -std=c99 -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -Wall -Wextra"}
 
 mkdir -p build
+
+# The platform half of the seam is chosen here, by uname, and its object is
+# the ONLY one compiled with a namespace widening macro. Everything above the
+# seam builds against the common flags and cannot reach a platform extension
+# even by accident; bsaudit.sh checks that against the objects rather than
+# trusting this comment.
+case "$(uname -s)" in
+    FreeBSD) BS_SEAM=sys_freebsd; BS_SEAM_FLAGS=-D__BSD_VISIBLE=1 ;;
+    Linux)   BS_SEAM=sys_linux;   BS_SEAM_FLAGS=-D_GNU_SOURCE ;;
+    *)       echo "build: no platform seam for $(uname -s)" >&2; exit 1 ;;
+esac
+echo "build: seam is src/$BS_SEAM.c"
+
+# --relink: one unit, then the link, and nothing else at all.
+#
+# It is here rather than in tools/bsmut.sh because a mutation tester with its
+# own cc line would be a second definition of the build, in the repository
+# whose whole first paragraph is about not having one. And it stops before the
+# checkers below: a mutation is in src/ by construction, and rebuilding the
+# ORACLES with it is the one thing a mutation test must never do.
+#
+# It refuses unless a full build has already produced build/obj, because an
+# incremental build over objects from some other source state is how a suite
+# comes to measure a binary nobody described.
+if [ "${1:-}" = "--relink" ]; then
+    [ $# -eq 2 ] || { echo "build: --relink takes one unit name" >&2; exit 2; }
+    [ -d build/obj ] || { echo "build: --relink needs a full build first" >&2; exit 2; }
+    [ -f "src/$2.c" ] || { echo "build: no such unit src/$2.c" >&2; exit 2; }
+    bs_relink_flags=""
+    if [ "$2" = "$(cat build/obj/SEAM)" ]; then bs_relink_flags=$BS_SEAM_FLAGS; fi
+    # shellcheck disable=SC2086
+    $CC $CFLAGS $bs_relink_flags -c -o "build/obj/$2.o" "src/$2.c"
+    # shellcheck disable=SC2086
+    $CC $CFLAGS -o build/brainstem build/obj/*.o
+    exit 0
+fi
+
 
 # Every binary the suite uses is built here, so a compile error is reported as
 # a build failure rather than surfacing later as a mysterious missing tool.
@@ -69,18 +118,10 @@ $CC $CFLAGS -o build/bsbf    tools/bsbf.c
 # line with eleven files on it.
 BS_UNITS="main broker child ops op_ctl op_time op_rand op_io op_fs op_net op_proc path frame err sys_posix det fdtab stdh replay sys_net sys_proc"
 
-# The platform half of the seam is chosen here, by uname, and its object is
-# the ONLY one compiled with a namespace widening macro. Everything above the
-# seam builds against the common flags and cannot reach a platform extension
-# even by accident; bsaudit.sh checks that against the objects rather than
-# trusting this comment.
-case "$(uname -s)" in
-    FreeBSD) BS_SEAM=sys_freebsd; BS_SEAM_FLAGS=-D__BSD_VISIBLE=1 ;;
-    Linux)   BS_SEAM=sys_linux;   BS_SEAM_FLAGS=-D_GNU_SOURCE ;;
-    *)       echo "build: no platform seam for $(uname -s)" >&2; exit 1 ;;
-esac
-echo "build: seam is src/$BS_SEAM.c"
-
+# --relink: one unit, then the link. Everything above this point -- the
+# checkers, the interpreter -- is untouched, because a mutation is in src/ by
+# construction and rebuilding the oracles with it would be the one thing a
+# mutation test must never do.
 rm -rf build/obj
 mkdir -p build/obj
 

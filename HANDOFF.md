@@ -262,16 +262,16 @@ marker in the suite at all.
 
 | tier | built | run.sh lines | what it is |
 |---|---|---|---|
-| 0 | yes | 8 | checker self-tests |
+| 0 | yes | 9 | checker self-tests |
 | 1 | yes | 17 | interpreter self-test, all three EOF modes |
 | 2 | yes | 1 | the program is still brainfuck |
 | 3 | yes | 1 | fixture regeneration |
 | 3a | yes | 3 | fixture legibility, and the expander knows no ABI |
 | 3b | yes | 1 | the header does not lie: tools/bspoke.sh, six rules |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | yes | 23 | per-op round trip |
+| 5 | yes | 25 | per-op round trip, all twenty three ops |
 | 5a | yes | 6 | metamorphic: change one knob, require the rest unchanged |
-| 6 | yes | 17 | error paths |
+| 6 | yes | 19 | error paths, every status reachable |
 | 7 | yes | 21 | determinism: seed, clocks, sorted walks, and --replay |
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
@@ -279,7 +279,7 @@ marker in the suite at all.
 | 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 10 | the tables and the lane definitions agree |
-| 11 | manual | 0 | mutation, a discipline rather than a check |
+| 11 | yes | 1 | mutation: 33 defects, each caught by a NAMED check |
 | 12 | no | 0 | purity audit, M8 |
 
 ## Why this project exists, since the name is not obvious
