@@ -271,7 +271,7 @@ marker in the suite at all.
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
 | 5 | yes | 23 | per-op round trip |
 | 6 | yes | 17 | error paths |
-| 7 | yes | 12 | determinism: seed, frozen and virtual clock, both polarities |
+| 7 | yes | 21 | determinism: seed, clocks, sorted walks, and --replay |
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
 | 10 | yes | 13 | platform parity, against traces pinned in tests/trace/ |

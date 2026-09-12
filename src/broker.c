@@ -36,6 +36,7 @@
 #include "det.h"
 #include "fdtab.h"
 #include "stdh.h"
+#include "replay.h"
 
 /* Two fixed buffers and no allocation on the ABI path, per CONVENTIONS
  * section 5. A frame is at most three bytes of header and a u16 of payload,
@@ -165,25 +166,33 @@ int bs_broker_run(const struct bs_opts *o) {
     ctx.exiting    = 0;
     ctx.exit_code  = 0;
 
-    /* The seam's one-time startup: the monotonic origin is normalised to
-     * zero here, before the child exists, so "time since the broker started"
-     * means the same thing in every run rather than encoding how long this
-     * machine has been up. Anything else the seam would work out lazily goes
-     * here too -- see sys.h. */
-    sys_init();
+    /* UNDER --replay NONE OF THIS HAPPENS, and that absence is the claim.
+     * A replay answers every frame out of the recording, so it has no use
+     * for a clock origin, a handle table or the broker's own stdio -- and
+     * not doing them is what makes "no syscall on the ABI path" true of the
+     * whole run rather than of the loop alone. See replay.h. */
+    if (!bs_replay_active()) {
+        /* The seam's one-time startup: the monotonic origin is normalised to
+         * zero here, before the child exists, so "time since the broker
+         * started" means the same thing in every run rather than encoding how
+         * long this machine has been up. Anything else the seam would work
+         * out lazily goes here too -- see sys.h. */
+        sys_init();
 
-    /* The handle table, then the three standard handles, and both before the
-     * child so a program has stdin, stdout and stderr from its very first
-     * frame. There is no command line involved: ABI.md section 8 used to
-     * describe a preopen model and describes reachability instead. */
-    bs_fdtab_init();
-    {
-        int bad = 0;
-        bs_err se = bs_stdh_install(&bad);
-        if (se != BS_OK) {
-            fprintf(stderr, "brainstem: cannot take over descriptor %d: %s\n",
-                    bad, bs_err_text(se));
-            return BS_EXIT_USAGE;
+        /* The handle table, then the three standard handles, and both before
+         * the child so a program has stdin, stdout and stderr from its very
+         * first frame. There is no command line involved: ABI.md section 8
+         * used to describe a preopen model and describes reachability
+         * instead. */
+        bs_fdtab_init();
+        {
+            int bad = 0;
+            bs_err se = bs_stdh_install(&bad);
+            if (se != BS_OK) {
+                fprintf(stderr, "brainstem: cannot take over descriptor %d: %s\n",
+                        bad, bs_err_text(se));
+                return BS_EXIT_USAGE;
+            }
         }
     }
 
@@ -255,7 +264,14 @@ int bs_broker_run(const struct bs_opts *o) {
             bs_cur_init(&req, in_arena, len);
             bs_buf_init(&rep, out_arena, sizeof out_arena);
 
-            if (!op) {
+            if (bs_replay_active()) {
+                /* Before the op table, not after it, and before the hello
+                 * and arity checks too. The recorded reply IS the answer,
+                 * including a recorded NOSUCHOP or BADLEN -- re-deriving it
+                 * would make the replay a second opinion about the broker
+                 * rather than a check on the recording. */
+                st = bs_replay_frame(kind, in_arena, len, &rep);
+            } else if (!op) {
                 /* Not fatal. Every frame is length prefixed, so the payload
                  * has already been consumed and the stream is still in step.
                  * This is the forward compatibility path for a program built
@@ -296,6 +312,30 @@ int bs_broker_run(const struct bs_opts *o) {
     }
 
     bs_child_finish(&ch, &exited, &code);
+
+    /* A replay that ran out of program before it ran out of recording is a
+     * divergence too, and it is the one a per-frame comparison cannot see:
+     * every frame the program DID send matched. */
+    if (bs_replay_active()) {
+        if (bs_replay_left() != 0) {
+            fprintf(stderr,
+                "brainstem: --replay: the program stopped after %lu of %lu frames\n",
+                (unsigned long)(bs_replay_count() - bs_replay_left()),
+                (unsigned long)bs_replay_count());
+            return BS_EXIT_PROTO;
+        }
+        /* The status of a replay is about the REPLAY. A recorded ctl.exit of
+         * 3 does not make this exit 3, and ending without an exit frame is
+         * not worth a warning here: the question a replay answers is "does
+         * this still happen", not "what happened". An interpreter that died
+         * still matters, because then nothing was proved at all. */
+        if (!exited) {
+            fprintf(stderr, "brainstem: the interpreter was killed by signal %d\n", code);
+            return BS_EXIT_INTERP;
+        }
+        if (code == 127) return BS_EXIT_INTERP;
+        return BS_EXIT_OK;
+    }
 
     if (ctx.exiting) {
         /* The program asked for a status; that is the answer, whatever the

@@ -794,6 +794,95 @@ run "an empty epoch is refused rather than read as zero" sh -c '
 run "a zero virtual step is refused" sh -c '
     ./build/brainstem --clock virtual,step=0 -- ./build/bfi bf/ctl/hello.bf >/dev/null </dev/null 2>&1; test $? -eq 2'
 
+echo
+echo "== tier 7: --replay, and the trace as a complete record =="
+# WHAT REPLAY IS FOR. Tier 10 pins traces and tier 7 requires two runs to
+# produce the same one; all of that treats a trace as a RECORD. Nothing here
+# checked it was a COMPLETE record -- a trace that dropped a frame or
+# truncated a payload would still compare equal to a pinned copy of itself.
+# A recording that cannot drive the program that produced it is not a record.
+#
+# AND NO SYSCALL IS MADE ON THE ABI PATH, which is checked BEHAVIOURALLY
+# rather than with a tracer, and that is the stronger check of the two here.
+# A syscall count proves nothing was asked; replaying a frozen clock under
+# --clock live, or a seeded keystream with no seed, proves the VALUE came out
+# of the recording. Those are the two ops that cross the seam most visibly,
+# and the filesystem gets the same treatment below.
+run "a recorded conversation replays, frame for frame" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" \
+        "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>"$BS_TMP/rec" >/dev/null
+    "$BS_R/build/brainstem" --replay "$BS_TMP/rec" -- "$BS_R/build/bfi" \
+        "$BS_R/bf/fs/roundtrip.bf" </dev/null'
+# The one that proves the filesystem was never touched: the recorded
+# conversation makes a directory, writes a file, renames it and removes it.
+# Replayed, it must leave the directory it runs in exactly as empty as it
+# found it.
+run "and it touches nothing -- an empty directory is still empty afterwards" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" \
+        "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>"$BS_TMP/rec" >/dev/null
+    rm -rf "$BS_TMP/empty" && mkdir -p "$BS_TMP/empty"
+    (cd "$BS_TMP/empty" && "$BS_R/build/brainstem" --replay "$BS_TMP/rec" \
+        -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) || exit 1
+    left=$(ls -A "$BS_TMP/empty")
+    test -z "$left" || { echo "the replay created: $left"; exit 1; }
+    exit 0'
+run "a frozen clock replayed under --clock live still reports the frozen instant" sh -c '
+    ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf \
+        </dev/null 2>"$BS_TMP/rec" >/dev/null
+    got=$(./build/brainstem --trace --clock live --replay "$BS_TMP/rec" -- ./build/bfi \
+          bf/time/clock.bf </dev/null 2>&1 >/dev/null | grep -c "< 00 len=12 00f15365")
+    test "$got" = 1'
+run "a seeded keystream replayed with no seed still comes back" sh -c '
+    ./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi \
+        bf/rand/bytes.bf </dev/null 2>"$BS_TMP/rec" >/dev/null
+    ./build/brainstem --trace --replay "$BS_TMP/rec" -- ./build/bfi bf/rand/bytes.bf \
+        </dev/null 2>&1 >/dev/null \
+        | grep -q "< 00 len=16 82233aa0ca0a14573efd34e9a85da697"'
+# Four ways a replay must refuse, because a replay that accepted anything
+# would be a check that never fails -- and this suite has met that shape
+# before.
+run "a divergence names the frame and both payloads" sh -c '
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>"$BS_TMP/rec" >/dev/null
+    out=$(./build/brainstem --replay "$BS_TMP/rec" -- ./build/bfi bf/time/clock.bf \
+          </dev/null 2>&1); rc=$?
+    test $rc -ne 0 || { echo "a divergent program replayed cleanly"; exit 1; }
+    printf "%s\n" "$out" | grep -q "frame 2 diverges" || { echo "$out"; exit 1; }
+    exit 0'
+run "a program that outruns the recording is refused" sh -c '
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>"$BS_TMP/rec" >/dev/null
+    head -2 "$BS_TMP/rec" > "$BS_TMP/short"
+    out=$(./build/brainstem --replay "$BS_TMP/short" -- ./build/bfi bf/ctl/hello.bf \
+          </dev/null 2>&1); rc=$?
+    test $rc -ne 0 || { echo "the program sent a frame the recording did not have"; exit 1; }
+    printf "%s\n" "$out" | grep -q "the recording has 1" || { echo "$out"; exit 1; }
+    exit 0'
+run "a program that stops short of the recording is refused" sh -c '
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>"$BS_TMP/rec" >/dev/null
+    cat "$BS_TMP/rec" > "$BS_TMP/long"
+    tail -2 "$BS_TMP/rec" >> "$BS_TMP/long"
+    out=$(./build/brainstem --replay "$BS_TMP/long" -- ./build/bfi bf/ctl/hello.bf \
+          </dev/null 2>&1); rc=$?
+    test $rc -ne 0 || { echo "the program ended with the recording unfinished"; exit 1; }
+    printf "%s\n" "$out" | grep -q "stopped after 2 of 3 frames" || { echo "$out"; exit 1; }
+    exit 0'
+# A NORMALISED trace is the trap worth a named error. tests/trace/ holds files
+# with %% and H where the masked bytes were, and they are the traces a person
+# has to hand. Skipping their unparseable lines would produce an empty
+# recording and a replay that matched nothing at all -- passing, loudly,
+# having checked nothing.
+run "a normalised trace from tests/trace is refused, by name" sh -c '
+    out=$(./build/brainstem --replay tests/trace/fs.roundtrip.txt -- ./build/bfi \
+          bf/fs/roundtrip.bf </dev/null 2>&1); rc=$?
+    test $rc -ne 0 || { echo "a normalised trace replayed"; exit 1; }
+    printf "%s\n" "$out" | grep -q "NORMALISED" || { echo "$out"; exit 1; }
+    exit 0'
+run "a recording that breaks the request-reply alternation is refused" sh -c '
+    printf "brainstem: < 00 len=0\n" > "$BS_TMP/bad"
+    ./build/brainstem --replay "$BS_TMP/bad" -- ./build/bfi bf/ctl/hello.bf \
+        </dev/null >/dev/null 2>&1; test $? -eq 2'
+
 # TIER 8
 echo
 echo "== tier 8: the interpreter semantics matrix =="

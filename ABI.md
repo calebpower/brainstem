@@ -741,8 +741,25 @@ never generated" — and a syscall broker cannot keep that rule. So it keeps the
 | `--clock frozen[=EPOCH]` | built | every `clock_now` returns the same instant |
 | `--clock virtual[=EPOCH][,step=NS]` | built | advances by `step` **per request**, not per wall-clock second |
 | `--trace` | built | prints every frame, both directions, payload in hex, to stderr |
-| `--sort-readdir` | M7 | normalises directory order |
-| `--replay FILE` | M7 | re-runs against a recorded trace with **no syscalls at all** |
+| `--sort-readdir` | built | a directory enumerates in byte order of its names |
+| `--replay FILE` | built | answers every frame from a recorded `--trace`, with **no syscall on the ABI path** |
+
+**A directory has no order**, and that is the third source of
+nondeterminism after the clock and the generator. ext4 returns entries in
+hash order and ufs in roughly creation order; neither is a property of the
+program, so `readdir` is not reproducible across two machines without
+`--sort-readdir`. The order it imposes is byte order on the name -- not a
+collation, which would depend on a locale and so reintroduce exactly what it
+removes.
+
+**`--replay` answers from the recording and calls no handler.** Every
+request the program emits is compared against the one recorded at that
+position, and a mismatch is reported by frame number with both payloads. The
+broker installs no standard handles, captures no clock origin and opens
+nothing, so a frozen instant replayed under `--clock live` is still the
+frozen instant -- which is how the suite checks the claim, rather than by
+counting syscalls. Its exit status is about the replay, not about the
+program: a recorded `exit 3` does not make a replay exit 3.
 
 A malformed seed or clock spec is **refused, never repaired**. A seed that was
 silently truncated or an epoch silently read as zero would make two runs differ

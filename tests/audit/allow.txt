@@ -47,6 +47,7 @@ child waitpid
 # its own. That probe is why this unit looks like child.c with extras: it
 # forks and execs to answer a question no other part of the program asks. ----
 main errno
+main open
 main fprintf
 main printf
 main sscanf
@@ -66,6 +67,14 @@ main read
 main unlink
 main waitpid
 main write
+
+# ---- replay.c: the recording, and the comparison. It parses text and
+# compares bytes, and the only thing it reaches outside itself for is the
+# diagnosis -- which is most of its value, since a divergence has to say
+# WHICH frame and WHAT differed or it is no better than a hang. main.c reads
+# the file, so there is no open here and there is not meant to be. ----
+replay fprintf
+replay stderr
 
 # ---- ops.c: the table. It reports a malformed table and nothing else. ----
 ops fprintf

@@ -14,6 +14,7 @@
  *   --seed HEX             32 hex characters; makes random_bytes deterministic
  *   --clock SPEC           live | frozen[=EPOCH] | virtual[=EPOCH][,step=NS]
  *   --sort-readdir         enumerate a directory in byte order of its names
+ *   --replay FILE          answer every frame from a recorded --trace
  *   --trace                print every frame to stderr
  *   --check-interpreter P  probe P for the one property the protocol needs
  *   --dump-abi             print the op table, for tools/bsabi
@@ -29,12 +30,14 @@
 #include <errno.h>
 #include <poll.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #include "brainstem.h"
 #include "broker.h"
 #include "ops.h"
 #include "det.h"
 #include "sys.h"
+#include "replay.h"
 
 static void usage(const char *me) {
     fprintf(stderr,
@@ -119,6 +122,43 @@ static int check_interpreter(const char *interp) {
         "brainstem: fix it with setvbuf(stdout, NULL, _IONBF, 0), or try stdbuf -o0.\n",
         interp);
     return BS_EXIT_INTERP;
+}
+
+/* --replay FILE: load a recording made with --trace.
+ *
+ * The file is read HERE rather than in replay.c, and before the interpreter
+ * is started, for two reasons that are really one. main.c is the unit that
+ * talks to the operator -- argv, and the probe program --check-interpreter
+ * writes -- so a path from the command line is its business, and replay.c
+ * stays a parser with no external surface at all. And loading before the
+ * fork puts these reads outside the window tools/bscalls.sh measures, which
+ * is what lets a replay's measured syscall surface be the empty set.
+ *
+ * Fed as raw bytes: a trace line can be 131 kilobytes, because a payload can
+ * be 65535 bytes and --trace does not truncate, so the buffer that assembles
+ * a line belongs with the parser and not here. */
+static int load_replay(const char *path) {
+    unsigned char chunk[4096];
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        fprintf(stderr, "brainstem: --replay: cannot read %s\n", path);
+        return BS_EXIT_USAGE;
+    }
+    bs_replay_begin();
+    for (;;) {
+        ssize_t k = read(fd, chunk, sizeof chunk);
+        if (k < 0) {
+            if (errno == EINTR) continue;
+            fprintf(stderr, "brainstem: --replay: cannot read %s\n", path);
+            close(fd);
+            return BS_EXIT_USAGE;
+        }
+        if (k == 0) break;
+        if (bs_replay_push(chunk, (size_t)k) != BS_OK) { close(fd); return BS_EXIT_USAGE; }
+    }
+    close(fd);
+    if (bs_replay_end() != BS_OK) return BS_EXIT_USAGE;
+    return BS_EXIT_OK;
 }
 
 /* The determinism knobs, checked against vectors computed OUTSIDE this
@@ -310,6 +350,13 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "--trace") == 0) { o.trace = 1; continue; }
         if (strcmp(a, "--sort-readdir") == 0) { det_set_sort_readdir(); continue; }
+        if (strcmp(a, "--replay") == 0) {
+            int rc;
+            if (i + 1 >= argc) { usage(argv[0]); return BS_EXIT_USAGE; }
+            rc = load_replay(argv[++i]);
+            if (rc != BS_EXIT_OK) return rc;
+            continue;
+        }
         if (strcmp(a, "--seed") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return BS_EXIT_USAGE; }
             if (det_set_seed(argv[++i]) != BS_OK) {

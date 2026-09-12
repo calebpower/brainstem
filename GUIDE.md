@@ -118,7 +118,7 @@ row marked for a later milestone is one that is still refused.
 | `--dump-abi` | now | print the op table, one row per line |
 | `--selftest` | now | the broker's own checks |
 | `--sort-readdir` | now | enumerate a directory in byte order of its names |
-| `--replay FILE` | M7 | re-run against a recorded trace, with no syscalls at all |
+| `--replay FILE` | now | answer every frame from a recorded `--trace`, touching nothing |
 
 **There are no flags for reaching things, and that is the design.** Your
 program sees the system the broker sees: paths are absolute or relative to the
@@ -185,6 +185,32 @@ It costs a full rescan of the directory per entry, because the broker
 allocates nothing and so holds one name rather than all of them. For the
 directory sizes a brainfuck program will walk that is not a cost you can
 measure; if it ever is, do not turn it on.
+
+### Running a trace again
+
+Capture a trace and you can replay it:
+
+```sh
+brainstem --trace -- ./build/bfi prog.bf 2>run.txt
+brainstem --replay run.txt -- ./build/bfi prog.bf
+```
+
+The second command answers every frame out of `run.txt` instead of doing any
+of it. Nothing is opened, no clock is read, no socket is made — so this is how
+you find out whether a change to your program changed the conversation, and
+**where**: a divergence is reported by frame number with both payloads in hex,
+which is a much better answer than a diff of two trace files.
+
+It is also how you check that your program is deterministic at all. If the
+same `.bf` replays against its own recording, it asked for the same things in
+the same order.
+
+Two things to know. The exit status is about the replay, not about your
+program — a recorded `exit 3` replays as success, because the question is
+whether it still happens. And the traces in `tests/trace/` are **normalised**:
+they have `%%` and `H` where masked bytes were, so they can be compared across
+machines. Those cannot be replayed, and brainstem says so rather than
+pretending to.
 
 ---
 
