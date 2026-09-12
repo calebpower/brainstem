@@ -299,10 +299,14 @@ run "the handshake GUIDE tells you to write is the one the fixture writes" sh -c
     line=$(grep -m1 "^EMIT 01" bf/ctl/hello.poke)
     grep -q "\`$line\`" GUIDE.md'
 
-# The vendored interpreter carries one intentional delta from upstream and the
-# whole project rests on it. Someone tidying the vendored file back toward its
-# source would reintroduce a deadlock whose only symptom is a hang, so the
-# delta is pinned here rather than trusted to a comment.
+# The whole project rests on this one line, so it is pinned here rather than
+# trusted to a comment: without it a brokered conversation deadlocks with no
+# output and no core, which is the worst diagnosis this program can give.
+#
+# It is no longer a DELTA. bfsodium accepted the fix and it landed there in
+# 59b45b0, so tidying the vendored file back toward its source is now safe --
+# the source has it. What the check still guards is somebody deleting it from
+# either copy, which is the same hazard by a shorter route.
 run "the vendored interpreter still has the unbuffering fix" \
     grep -q "setvbuf(stdout, NULL, _IONBF, 0)" tools/bfi.c
 

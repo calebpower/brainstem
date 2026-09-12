@@ -1,31 +1,40 @@
 /*
  * bfi.c — the pinned reference brainfuck interpreter.
  *
- * VENDORED from bfsodium at commit e98794f (tools/bfi.c). It is a TEST FIXTURE
+ * VENDORED from bfsodium at commit 8edf0f6, where tools/bfi.c last changed in
+ * 59b45b0. It is a TEST FIXTURE
  * and nothing else: brainstem embeds no interpreter and hard depends on none.
  * The shipped broker takes --interp and defaults to `bfi` on PATH, never to a
  * path inside this repo. Any conforming interpreter will do, which is the
  * entire point of the portability claim.
  *
- * THREE DELTAS FROM UPSTREAM, all of them additive, all of them here:
+ * THERE USED TO BE THREE DELTAS AND THERE ARE NOW TWO.
  *
- *   1. setvbuf(stdout, NULL, _IONBF, 0).
- *      Upstream calls putchar() with no setvbuf and fflush()es once, after the
- *      program has ended. Over a pipe, stdio is fully buffered, so not one
- *      byte of a request reaches the broker until the program terminates -- by
- *      which time the program is already blocked on ',' awaiting a reply that
- *      cannot come. Silent, total deadlock whose only symptom is a hang. This
- *      one line is the fix, and it is proposed upstream separately; when it
- *      lands there this delta disappears.
+ * The one that went was the important one: setvbuf(stdout, NULL, _IONBF, 0).
+ * Upstream called putchar() with no setvbuf and fflush()ed once, after the
+ * program had ended -- so over a pipe not one byte of a request reached the
+ * broker until the program terminated, by which time the program was already
+ * blocked on ',' awaiting a reply that could not come. Silent, total deadlock
+ * whose only symptom is a hang, and the entire reason brainstem states
+ * requirement I1 and ships --check-interpreter.
  *
- *   2. BFI_EOF, which selects what ',' does at end of input.
+ * It was proposed upstream, accepted, and landed in bfsodium 59b45b0. Both
+ * copies have the line now, so it is no longer a difference between them --
+ * which is what a fix going home looks like, and is worth noticing rather than
+ * quietly renumbering.
+ *
+ * TWO DELTAS FROM UPSTREAM REMAIN, both additive, both here, and neither has
+ * any reason to go upstream: they exist to test a broker bfsodium does not
+ * have.
+ *
+ *   1. BFI_EOF, which selects what ',' does at end of input.
  *      Brainfuck does not specify this and real interpreters disagree three
  *      ways. brainstem's claim is that its programs work under ANY conforming
  *      interpreter, so the suite runs every fixture under all three. Upstream
  *      has only the first, which is this file's default, so a run with the
  *      variable unset behaves exactly as bfsodium's does.
  *
- *   3. BFI_FLUSH=block, which puts the stdout buffering defect BACK.
+ *   2. BFI_FLUSH=block, which puts the stdout buffering defect BACK.
  *      A deadlock the suite cannot reproduce is a deadlock that comes back.
  *      This knob is how the liveness tier proves the broker diagnoses a
  *      buffering interpreter instead of hanging behind one.
@@ -77,9 +86,9 @@ static int eof_mode(void) {
 int main(int argc, char **argv) {
     if (argc != 2) { fprintf(stderr, "usage: %s program.bf\n", argv[0]); return 2; }
 
-    /* Delta 1, and delta 3 which exists to undo it. A brokered conversation is
-     * request then response, so a buffered byte is a byte the far end is
-     * already waiting for. */
+    /* Upstream's setvbuf, wrapped by delta 2 so the suite can undo it. A
+     * brokered conversation is request then response, so a buffered byte is a
+     * byte the far end is already waiting for. */
     {
         const char *fl = getenv("BFI_FLUSH");
         if (fl && strcmp(fl, "block") == 0) {
@@ -223,7 +232,7 @@ int main(int argc, char **argv) {
             case '+': tape[p]++; break;            /* wraps mod 256 */
             case '-': tape[p]--; break;            /* wraps mod 256 */
             case '.': putchar(tape[p]); break;
-            case ',': {                            /* delta 2 is the else arm */
+            case ',': {                            /* delta 1 is the else arm */
                 int in = getchar();
                 if (in != EOF) tape[p] = (unsigned char)in;
                 else if (at_eof == EOF_ZERO) tape[p] = 0;

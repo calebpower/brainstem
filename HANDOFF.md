@@ -718,18 +718,30 @@ for.
 ## Known soft spots
 
 - **Two copies of the interpreter can drift.** `tools/bfi.c` is vendored from
-  bfsodium at commit `e98794f`, and **no check inside this repository can
-  detect divergence from upstream.** The mitigation is a periodic manual diff.
-  The suite does pin the one delta that matters — if someone tidies the
-  `setvbuf` line away, a check fails rather than a hang appearing.
-  `tools/hx.c` is verbatim and can be diffed directly.
+  bfsodium at commit `8edf0f6`, where the file itself last changed in
+  `59b45b0`, and **no check inside this repository can detect divergence from
+  upstream.** The mitigation is a periodic manual diff. The suite does pin the
+  line that matters — if somebody deletes the `setvbuf` call, a check fails
+  rather than a hang appearing. `tools/hx.c` is verbatim and can be diffed
+  directly.
 
-  The delta count is **shrinking**. bfsodium has accepted the `setvbuf` fix on
-  a branch of its own, with a test that catches the buffering directly: a
-  program that writes one byte and then spins forever, killed by `timeout`
-  with SIGTERM, which does not flush. Once that lands, this copy's deltas are
-  the two test knobs — `BFI_EOF` and `BFI_FLUSH` — which exist for tier 8 and
-  have no reason to go upstream. Re-diff after it merges and update this note.
+  **THE FIX WENT HOME.** bfsodium accepted the `setvbuf` one-liner and it
+  landed on its `main` in `59b45b0`, with a test that catches the buffering
+  directly: a program that writes one byte and then spins forever, killed by
+  `timeout` with SIGTERM, which does not flush. Both copies have the line now,
+  so it is no longer a difference between them.
+
+  That leaves **two deltas**, and they are the ones that should never go
+  upstream: `BFI_EOF` and `BFI_FLUSH`, which exist to test a broker bfsodium
+  does not have. The interesting consequence is that the delta count has
+  stopped shrinking — it is at its floor, and any future growth in it is a
+  thing to argue about rather than a thing to schedule.
+
+  The current difference is 37 lines outside the header comment, all of it
+  those two knobs. Re-diff with:
+
+      git -C ../bfsodium show main:tools/bfi.c > /tmp/up.c
+      diff /tmp/up.c tools/bfi.c
 - **Every tier this project declares is built.** That is true for the first
   time at M7, and it is true partly because one of them was DELETED rather
   than implemented -- see "the lockdown that was removed" below, and do not
