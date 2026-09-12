@@ -134,10 +134,6 @@ time.live||bf/time/clock.bf
 time.frozen|--clock frozen=1700000000|bf/time/clock.bf
 rand.live||bf/rand/bytes.bf
 rand.seeded|--seed 000102030405060708090a0b0c0d0e0f|bf/rand/bytes.bf
-fs.roundtrip|--preopen-dir work=%W|bf/fs/roundtrip.bf
-fs.refused|--preopen-dir work=%W|bf/fs/refused.bf
-proc.drive|--op-timeout 5000 --preopen-dir work=%P|bf/proc/drive.bf
-proc.refused|--op-timeout 5000 --preopen-dir work=%P|bf/proc/refused.bf
 EOT
 }
 
@@ -162,6 +158,10 @@ EOT
 # %W in the options is replaced with a directory created fresh for that case.
 observe_cases() {
     cat <<'EOT'
+fs.roundtrip|%W|bf/fs/roundtrip.bf
+fs.refused|%W|bf/fs/refused.bf
+proc.drive|--op-timeout 5000 %P|bf/proc/drive.bf
+proc.refused|--op-timeout 5000 %P|bf/proc/refused.bf
 EOT
 }
 
@@ -176,29 +176,38 @@ platform_dir() {
 measure() {  # measure OPTS FIXTURE OUTFILE
     opts=$1; fixture=$2; out=$3
     t=${TMPDIR:-/tmp}/bscalls.$$
-    # %W is a fresh empty directory; %P is a fresh one with the interpreter
-    # and the inner program in it, because a brainfuck program cannot copy a
-    # binary. Two placeholders rather than one: fs.roundtrip does a readdir
-    # and expects exactly one entry, so preparing every directory the same way
-    # would break it.
+    # %W asks for a fresh empty WORKING DIRECTORY; %P for a fresh one with the
+    # interpreter and the inner program in it, because a brainfuck program
+    # cannot copy a binary. Two placeholders rather than one: fs.roundtrip
+    # does a readdir and expects exactly one entry, so preparing every
+    # directory the same way would break it.
+    #
+    # Neither is a broker option any more. Since the preopen model was
+    # removed, a fixture reaches the filesystem the way any other process
+    # does, so the setup is a cd rather than a flag -- and the binaries have
+    # to be named absolutely from inside it.
+    cwd=""
     case "$opts" in
         *%W*)
             rm -rf "$t.work"; mkdir -p "$t.work"
-            opts=$(printf '%s' "$opts" | sed "s|%W|$t.work|")
+            cwd=$t.work
+            opts=$(printf '%s' "$opts" | sed "s|%W||")
             ;;
         *%P*)
             rm -rf "$t.work"; mkdir -p "$t.work"
             cp build/bfi "$t.work/bfi"
             cp bf/proc/echo.bf "$t.work/echo.bf"
-            opts=$(printf '%s' "$opts" | sed "s|%P|$t.work|")
+            cwd=$t.work
+            opts=$(printf '%s' "$opts" | sed "s|%P||")
             ;;
     esac
+    [ -n "$cwd" ] || cwd=$repo
     case "$(uname -s)" in
         Linux)
             command -v strace >/dev/null 2>&1 || { echo "bscalls: no strace"; return 1; }
             # No -f. The child is the interpreter, and what it asks the kernel
             # for is the interpreter's business, not this ABI's.
-            strace -o "$t.raw" -qq ./build/brainstem $opts -- ./build/bfi "$fixture" >/dev/null 2>&1 || true
+            (cd "$cwd" && strace -o "$t.raw" -qq "$repo/build/brainstem" $opts -- "$repo/build/bfi" "$repo/$fixture" </dev/null >/dev/null 2>&1) || true
             window strace "$t" < "$t.raw" > "$out" || return 1
             ;;
         FreeBSD)
@@ -206,7 +215,7 @@ measure() {  # measure OPTS FIXTURE OUTFILE
             rm -f "$t.ktrace"
             # No -i, for the same reason there is no -f above: -i would make
             # the trace inherit into the interpreter.
-            ktrace -f "$t.ktrace" -t c ./build/brainstem $opts -- ./build/bfi "$fixture" >/dev/null 2>&1 || true
+            (cd "$cwd" && ktrace -f "$t.ktrace" -t c "$repo/build/brainstem" $opts -- "$repo/build/bfi" "$repo/$fixture" </dev/null >/dev/null 2>&1) || true
             kdump -f "$t.ktrace" > "$t.raw" 2>/dev/null || true
             window kdump "$t" < "$t.raw" > "$out" || return 1
             ;;

@@ -35,7 +35,7 @@
 #include "sys.h"
 #include "det.h"
 #include "fdtab.h"
-#include "preopen.h"
+#include "stdh.h"
 
 /* Two fixed buffers and no allocation on the ABI path, per CONVENTIONS
  * section 5. A frame is at most three bytes of header and a u16 of payload,
@@ -172,17 +172,17 @@ int bs_broker_run(const struct bs_opts *o) {
      * here too -- see sys.h. */
     sys_init();
 
-    /* The handle table, then the preopens, and both before the child so a
-    * bad --preopen-dir is reported before an interpreter has been started
-    * to receive a world that does not exist. Handles are assigned here, in
-    * command line order, starting at index 1. */
+    /* The handle table, then the three standard handles, and both before the
+     * child so a program has stdin, stdout and stderr from its very first
+     * frame. There is no command line involved: ABI.md section 8 used to
+     * describe a preopen model and does not any more. */
     bs_fdtab_init();
     {
-        size_t bad = 0;
-        bs_err pe = bs_preopen_install(&bad);
-        if (pe != BS_OK) {
-            fprintf(stderr, "brainstem: cannot open preopen %u (%s): %s\n",
-                    (unsigned)(bad + 1), bs_preopen_word(bad), bs_err_text(pe));
+        int bad = 0;
+        bs_err se = bs_stdh_install(&bad);
+        if (se != BS_OK) {
+            fprintf(stderr, "brainstem: cannot take over descriptor %d: %s\n",
+                    bad, bs_err_text(se));
             return BS_EXIT_USAGE;
         }
     }

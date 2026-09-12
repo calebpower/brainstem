@@ -28,7 +28,18 @@ bs_out=${TMPDIR:-/tmp}/bs-run-output.$$
 # fixture that depends on its own history is one that passes until somebody
 # runs it twice.
 BS_TMP=$(mktemp -d)
-export BS_TMP
+# The repository root, for the checks that cd into a scratch directory. Since
+# the preopen model was removed, a fixture reaches the filesystem the way any
+# other process does -- so the suite gives it a working DIRECTORY rather than
+# a handle, and has to name the binaries absolutely from inside it.
+# EVERY BROKER INVOCATION BELOW REDIRECTS ITS STDIN, and that is not tidiness.
+# Since the three standard handles replaced preopens, the hello reply reports
+# what the broker's own stdin, stdout and stderr actually ARE -- a terminal, a
+# file, a pipe -- and their rights. That makes the reply depend on how the
+# suite itself was started, which a pinned trace cannot survive. Naming
+# /dev/null makes every check independent of whoever ran it.
+BS_R=$repo
+export BS_TMP BS_R
 trap 'rm -rf "$BS_TMP"; rm -f "$bs_out"' EXIT
 
 # ON FAILURE, SAY WHAT THE CHECK SAID.
@@ -388,23 +399,23 @@ echo "== tier 5: a standard brainfuck program completes a round trip =="
 # THE milestone. A file containing nothing but the eight instructions, run
 # under a general purpose interpreter, reaching an operating system.
 run "the handshake round trips and the program exits 0" sh -c '
-    ./build/brainstem -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1'
+    ./build/brainstem -- ./build/bfi bf/ctl/hello.bf >/dev/null </dev/null 2>&1'
 run "the trace shows exactly the four frames" sh -c '
-    got=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf 2>&1 | grep -c "brainstem: [<>]")
+    got=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>&1 | grep -c "brainstem: [<>]")
     test "$got" = 4'
 run "the program chooses the exit status" sh -c '
-    ./build/brainstem -- ./build/bfi bf/ctl/exitcode.bf >/dev/null 2>&1; test $? -eq 1'
+    ./build/brainstem -- ./build/bfi bf/ctl/exitcode.bf >/dev/null </dev/null 2>&1; test $? -eq 1'
 
 # The two ops that arrived with the seam. clock_now and random_bytes were
 # chosen to be first because arc4random_buf against getrandom is a REAL
 # divergence -- so the seam took its shape from one rather than from a guess
 # about what might diverge later.
 run "clock_now answers on both clocks" sh -c '
-    ./build/brainstem --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf >/dev/null 2>&1'
+    ./build/brainstem --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf >/dev/null </dev/null 2>&1'
 run "random_bytes returns as many bytes as it was asked for" sh -c '
-    ./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null | grep -q "< 00 len=16 "'
+    ./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null | grep -q "< 00 len=16 "'
 run "random_bytes of zero is a legal empty reply, not an error" sh -c '
-    got=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null | grep -c "^brainstem: < 00 len=0$")
+    got=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null | grep -c "^brainstem: < 00 len=0$")
     test "$got" = 2'
 
 
@@ -415,10 +426,10 @@ run "random_bytes of zero is a legal empty reply, not an error" sh -c '
 # passes until somebody runs it twice.
 run "the whole filesystem round trip completes" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    ./build/brainstem --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf >/dev/null 2>&1'
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) >/dev/null 2>&1'
 run "it really wrote the bytes, and really moved and removed the file" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    ./build/brainstem --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf >/dev/null 2>&1
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) >/dev/null 2>&1
     test -d "$BS_TMP/work/sub" || { echo "mkdir did not happen"; exit 1; }
     test ! -e "$BS_TMP/work/f" || { echo "rename left the old name behind"; exit 1; }
     test ! -e "$BS_TMP/work/g" || { echo "unlink did not happen"; exit 1; }
@@ -427,23 +438,26 @@ run "it really wrote the bytes, and really moved and removed the file" sh -c '
 # LENGTH of bytes -- a broker that echoed zeros would pass a length check.
 run "read returns what write was given" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null \
         | grep -q "< 00 len=2 6869"'
-run "a reused slot comes back with a new generation" sh -c '
+run "a reused slot comes back with a new generation each time" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    got=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+    got=$( (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null \
           | sed -n "s/^brainstem: < 00 len=4 //p" | tr "\n" " ")
-    test "$got" = "02000000 02000100 "'
+    test "$got" = "04000000 04000100 04000200 "'
 run "readdir yields one entry then ends" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    out=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null)
+    out=$( (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null)
     printf "%s\n" "$out" | grep -q "< 00 len=7 02030000737562" || { echo "the sub entry is wrong"; exit 1; }
     printf "%s\n" "$out" | grep -q "^brainstem: < 01 len=0$"  || { echo "the walk did not end"; exit 1; }
     exit 0'
-run "the preopen table describes the directory it was given" sh -c '
-    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
-        | grep -q "0100000002047f000000000004776f726b"'
+# The three handles every program starts with, named in the hello table so a
+# program can check rather than assume. The hex is "stdin" "stdout" "stderr"
+# with their length bytes, which is the tail of the record.
+run "the hello table describes the three standard handles" sh -c '
+    got=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>&1 >/dev/null \
+          | grep -c "05737464696e067374646f757406737464657272$")
+    test "$got" = 1'
 
 
 # The five net ops, in one conversation, with no second process involved.
@@ -452,9 +466,9 @@ run "the preopen table describes the directory it was given" sh -c '
 # connect frame -- so the fixture needs no fixed port, no helper binary and
 # no coordination outside the protocol.
 run "a brainfuck program connects to itself over TCP" sh -c '
-    ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/loopback.bf >/dev/null 2>&1'
+    ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/loopback.bf >/dev/null </dev/null 2>&1'
 run "the two bytes arrive through the socket" sh -c '
-    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf 2>&1 >/dev/null \
+    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf </dev/null 2>&1 >/dev/null \
         | grep -q "^brainstem: < 00 len=2 6869$"'
 # THE CHECK THAT MATTERS. bind was asked for port 0 and had to answer with a
 # real one, and the program had to carry those two bytes from a reply into a
@@ -462,15 +476,15 @@ run "the two bytes arrive through the socket" sh -c '
 # returned, the fixture would still connect to SOMETHING or fail -- so this
 # compares them rather than trusting that it worked.
 run "the port the program connects to is the port bind gave it" sh -c '
-    out=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf 2>&1 >/dev/null)
+    out=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf </dev/null 2>&1 >/dev/null)
     bound=$(printf "%s\n" "$out" | sed -n "s/^brainstem: < 00 len=32 ....\(....\).*/\1/p")
     used=$(printf "%s\n" "$out"  | sed -n "s/^brainstem: > 06 len=38 ................\(....\).*/\1/p")
     if [ -z "$bound" ] || [ "$bound" = "0000" ]; then echo "bind did not report a port: [$bound]"; exit 1; fi
     if [ "$bound" != "$used" ]; then echo "bind gave $bound, connect used $used"; exit 1; fi
     exit 0'
 run "accept reports a handle and a 32 byte peer address" sh -c '
-    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf 2>&1 >/dev/null \
-        | grep -q "^brainstem: < 00 len=36 03000000"'
+    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf </dev/null 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=36 06000000"'
 
 
 # THE PAYOFF. A file containing nothing but the eight brainfuck instructions
@@ -489,50 +503,50 @@ bs_procdir() {
 run "brainfuck drives brainfuck" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
-    ./build/brainstem --op-timeout 5000 --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf >/dev/null 2>&1'
+    (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) >/dev/null 2>&1'
 # The bytes went out through one pipe, through a second brainfuck program
 # running under its own interpreter, and back through another. A length check
 # alone would pass on a broker that echoed zeros.
 run "the bytes come back through the child" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
-    ./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf 2>&1 >/dev/null \
+    (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
         | grep -q "^brainstem: < 00 len=2 6869$"'
 run "the child exits 0 and wait reports it" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
-    ./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf 2>&1 >/dev/null \
+    (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
         | grep -q "^brainstem: < 00 len=4 01000000$"'
 # wait is idempotent after reaping: the kernel will only report a status once,
 # so the handle caches it. Two identical replies, from two identical requests.
 run "wait repeats itself after the child is reaped" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
-    got=$(./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf 2>&1 >/dev/null \
+    got=$( (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
           | grep -c "^brainstem: < 00 len=4 01000000$")
     test "$got" = 2'
 run "pipe yields a read end and a write end, in that order" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
-    ./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf 2>&1 >/dev/null \
-        | grep -q "^brainstem: < 00 len=8 0200000003000000$"'
+    (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=8 0400000005000000$"'
 
 # TIER 6
 echo
 echo "== tier 6: error paths =="
 # Each declared failure, reached by a real program rather than asserted.
 run "an op before hello is fatal" sh -c '
-    ./build/brainstem -- ./build/bfi bf/ctl/nohello.bf >/dev/null 2>&1; test $? -eq 70'
+    ./build/brainstem -- ./build/bfi bf/ctl/nohello.bf >/dev/null </dev/null 2>&1; test $? -eq 70'
 run "a bad magic is fatal" sh -c '
-    ./build/brainstem -- ./build/bfi bf/ctl/badmagic.bf >/dev/null 2>&1; test $? -eq 70'
+    ./build/brainstem -- ./build/bfi bf/ctl/badmagic.bf >/dev/null </dev/null 2>&1; test $? -eq 70'
 run "a wrong major version is fatal" sh -c '
-    ./build/brainstem -- ./build/bfi bf/ctl/badversion.bf >/dev/null 2>&1; test $? -eq 70'
+    ./build/brainstem -- ./build/bfi bf/ctl/badversion.bf >/dev/null </dev/null 2>&1; test $? -eq 70'
 run "a wrong arity is refused before the handler runs" sh -c '
-    ./build/brainstem -- ./build/bfi bf/ctl/badarity.bf >/dev/null 2>&1; test $? -eq 70'
+    ./build/brainstem -- ./build/bfi bf/ctl/badarity.bf >/dev/null </dev/null 2>&1; test $? -eq 70'
 run "an unknown opcode is recoverable" sh -c '
-    ./build/brainstem -- ./build/bfi bf/ctl/unknownop.bf >/dev/null 2>&1'
+    ./build/brainstem -- ./build/bfi bf/ctl/unknownop.bf >/dev/null </dev/null 2>&1'
 run "an unknown opcode answers NOSUCHOP and the program carries on" sh -c '
-    ./build/brainstem --trace -- ./build/bfi bf/ctl/unknownop.bf 2>&1 | grep -q "< 19 len=0"'
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/unknownop.bf </dev/null 2>&1 | grep -q "< 19 len=0"'
 
 # ABI.md invariant I6: an error reply carries no payload, ever. A program that
 # got a bad status reads exactly two more bytes, both zero, and is done.
@@ -545,15 +559,15 @@ run "an unknown opcode answers NOSUCHOP and the program carries on" sh -c '
 # builds a reply incrementally will make it load bearing.
 run "an error reply carries no payload" sh -c '
     rc=0
-    ./build/brainstem --trace -- ./build/bfi bf/ctl/badmagic.bf 2>&1 | grep -q "< e0 len=0" || rc=1
-    ./build/brainstem --trace -- ./build/bfi bf/ctl/badarity.bf 2>&1 | grep -q "< e2 len=0" || rc=1
-    ./build/brainstem --trace -- ./build/bfi bf/ctl/nohello.bf  2>&1 | grep -q "< e4 len=0" || rc=1
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/badmagic.bf </dev/null 2>&1 | grep -q "< e0 len=0" || rc=1
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/badarity.bf </dev/null 2>&1 | grep -q "< e2 len=0" || rc=1
+    ./build/brainstem --trace -- ./build/bfi bf/ctl/nohello.bf  </dev/null 2>&1 | grep -q "< e4 len=0" || rc=1
     exit $rc'
 
 run "an unknown clock id is INVAL rather than a plausible answer" sh -c '
-    ./build/brainstem --trace -- ./build/bfi bf/time/badclock.bf 2>&1 >/dev/null | grep -q "< 06 len=0"'
+    ./build/brainstem --trace -- ./build/bfi bf/time/badclock.bf </dev/null 2>&1 >/dev/null | grep -q "< 06 len=0"'
 run "and INVAL is recoverable: the conversation continues past it" sh -c '
-    ./build/brainstem --clock frozen=1700000000 -- ./build/bfi bf/time/badclock.bf >/dev/null 2>&1'
+    ./build/brainstem --clock frozen=1700000000 -- ./build/bfi bf/time/badclock.bf >/dev/null </dev/null 2>&1'
 
 
 # Nine refusals in one conversation, and the conversation continues through
@@ -563,9 +577,9 @@ run "and INVAL is recoverable: the conversation continues past it" sh -c '
 # would be one where a program could not afford to try anything.
 run "every filesystem refusal lands on its own status, in order" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    got=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf 2>&1 >/dev/null \
+    got=$( (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/refused.bf" </dev/null) 2>&1 >/dev/null \
           | sed -n "s/^brainstem: < \(..\) len=.*/\1/p" | tr "\n" " ")
-    want="00 04 06 05 06 0a 00 04 09 00 03 03 00 00 "
+    want="00 05 06 06 06 00 04 09 00 03 03 00 00 00 "
     if [ "$got" != "$want" ]; then
         echo "wanted: $want"
         echo "got:    $got"
@@ -574,15 +588,17 @@ run "every filesystem refusal lands on its own status, in order" sh -c '
     exit 0'
 run "and the program survives all nine and exits cleanly" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    ./build/brainstem --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf >/dev/null 2>&1'
-# The traversal refusal is the one worth stating on its own, because it is the
-# only one standing in for something the kernel is not yet doing. See
-# sys_beneath_is_kernel() for what that costs and when it changes.
-run "a path with .. in it is refused" sh -c '
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" -- "$BS_R/build/bfi" "$BS_R/bf/fs/refused.bf" </dev/null) >/dev/null 2>&1'
+# ".." AND ABSOLUTE PATHS ARE NOT REFUSED ANY MORE, and this is the case that
+# says so. The preopen model used to refuse both; it was removed because
+# brainstem exists to make the system visible to a brainfuck program, and a
+# literal path is the cheapest thing such a program can emit. Refusing one
+# only ever cost reachability -- it never bought containment, because this was
+# never a sandbox. The fixture stats "/" and expects thirty two bytes back.
+run "an absolute path reaches the system it names" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    got=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf 2>&1 >/dev/null \
-          | awk "/^brainstem: > 11 /{f=1;next} f&&/^brainstem: < /{print;exit}")
-    test "$got" = "brainstem: < 04 len=0"'
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/refused.bf" </dev/null 2>&1 >/dev/null) \
+        | grep -q "^brainstem: < 00 len=32 02"'
 
 
 # The socket refusals, in order. Two are worth naming. Family 3 Unix is
@@ -593,7 +609,7 @@ run "a path with .. in it is refused" sh -c '
 # than DENIED from its rights, because listen() strips CONNECT and a
 # rights-first check would blame the capability when the handle was wrong.
 run "every socket refusal lands on its own status, in order" sh -c '
-    got=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/refused.bf 2>&1 >/dev/null \
+    got=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/refused.bf </dev/null 2>&1 >/dev/null \
           | sed -n "s/^brainstem: < \(..\) .*/\1/p" | tr "\n" " ")
     want="00 06 17 06 06 00 20 03 00 00 00 26 04 00 00 "
     if [ "$got" != "$want" ]; then
@@ -607,10 +623,10 @@ run "every socket refusal lands on its own status, in order" sh -c '
 # as IO, which is the "errno that escaped the map" that CONVENTIONS names as
 # the reason the platform parity tier exists.
 run "a refused connection is CONNREFUSED and not a raw errno" sh -c '
-    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/refused.bf 2>&1 >/dev/null \
+    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/refused.bf </dev/null 2>&1 >/dev/null \
         | grep -q "^brainstem: < 20 len=0$"'
 run "and the program survives all of them and exits cleanly" sh -c '
-    ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/refused.bf >/dev/null 2>&1'
+    ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/refused.bf >/dev/null </dev/null 2>&1'
 
 
 # The process refusals. The last two are the interesting pair: spawning a
@@ -621,9 +637,9 @@ run "and the program survives all of them and exits cleanly" sh -c '
 run "every process refusal lands on its own status, in order" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
-    got=$(./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/refused.bf 2>&1 >/dev/null \
+    got=$( (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/refused.bf" </dev/null) 2>&1 >/dev/null \
           | sed -n "s/^brainstem: < \(..\) .*/\1/p" | tr "\n" " ")
-    want="00 06 06 04 06 00 00 03 00 00 "
+    want="00 06 06 03 00 00 03 00 00 "
     if [ "$got" != "$want" ]; then
         echo "wanted: $want"
         echo "got:    $got"
@@ -633,7 +649,7 @@ run "every process refusal lands on its own status, in order" sh -c '
 run "a child that could not exec is reported as exit 127" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
-    ./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/refused.bf 2>&1 >/dev/null \
+    (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/refused.bf" </dev/null) 2>&1 >/dev/null \
         | grep -q "^brainstem: < 00 len=4 017f0000$"'
 
 # TIER 7
@@ -649,28 +665,28 @@ echo "== tier 7: determinism =="
 # the knob is connected to anything. A generator that ignored its seed
 # entirely would pass "the same seed repeats" perfectly.
 run "the same seed gives byte identical output" sh -c '
-    a=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
-    b=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    a=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null)
     test "$a" = "$b"'
 run "a different seed gives different output" sh -c '
-    a=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
-    b=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e10 -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    a=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e10 -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null)
     test "$a" != "$b"'
 run "an unseeded generator does not repeat itself" sh -c '
-    a=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
-    b=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null)
+    a=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null)
     test "$a" != "$b"'
 run "a frozen clock reads the same in two runs" sh -c '
-    a=$(./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
-    b=$(./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    a=$(./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null)
     test "$a" = "$b"'
 run "a live clock does not" sh -c '
-    a=$(./build/brainstem --trace -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
-    b=$(./build/brainstem --trace -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    a=$(./build/brainstem --trace -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null)
     test "$a" != "$b"'
 run "a virtual clock reads the same in two runs" sh -c '
-    a=$(./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
-    b=$(./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null)
+    a=$(./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null)
+    b=$(./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null)
     test "$a" = "$b"'
 
 # The virtual clock is driven by the REQUEST COUNT, which is a property of the
@@ -680,7 +696,7 @@ run "a virtual clock reads the same in two runs" sh -c '
 # plus two seconds (1000 + 2 = 0x3EA) and the monotonic read on request three
 # is three seconds since a start that is defined to be zero.
 run "the virtual clock advances one step per request, not per read" sh -c '
-    got=$(./build/brainstem --trace --clock virtual=1000,step=1000000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
+    got=$(./build/brainstem --trace --clock virtual=1000,step=1000000000 -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null \
           | sed -n "s/^brainstem: < 00 len=12 //p" | tr "\n" " ")
     test "$got" = "ea0300000000000000000000 030000000000000000000000 "'
 
@@ -689,18 +705,18 @@ run "the virtual clock advances one step per request, not per read" sh -c '
 # reason nothing in the output could show, which is the one failure this
 # entire tier exists to make impossible.
 run "a short seed is refused" sh -c '
-    ./build/brainstem --seed 0011 -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+    ./build/brainstem --seed 0011 -- ./build/bfi bf/ctl/hello.bf >/dev/null </dev/null 2>&1; test $? -eq 2'
 run "a seed that is not hex is refused" sh -c '
-    ./build/brainstem --seed 000102030405060708090a0b0c0d0e0g -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+    ./build/brainstem --seed 000102030405060708090a0b0c0d0e0g -- ./build/bfi bf/ctl/hello.bf >/dev/null </dev/null 2>&1; test $? -eq 2'
 run "a malformed clock spec is refused" sh -c '
-    ./build/brainstem --clock fixed -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+    ./build/brainstem --clock fixed -- ./build/bfi bf/ctl/hello.bf >/dev/null </dev/null 2>&1; test $? -eq 2'
 # "frozen=" with nothing after it meant "frozen=0" in the first draft, because
 # strtol("") is 0 and says so only through errno. The self-test caught it; the
 # case is kept here so the suite says out loud which grammar is meant.
 run "an empty epoch is refused rather than read as zero" sh -c '
-    ./build/brainstem --clock frozen= -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+    ./build/brainstem --clock frozen= -- ./build/bfi bf/ctl/hello.bf >/dev/null </dev/null 2>&1; test $? -eq 2'
 run "a zero virtual step is refused" sh -c '
-    ./build/brainstem --clock virtual,step=0 -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1; test $? -eq 2'
+    ./build/brainstem --clock virtual,step=0 -- ./build/bfi bf/ctl/hello.bf >/dev/null </dev/null 2>&1; test $? -eq 2'
 
 # TIER 8
 echo
@@ -712,7 +728,7 @@ echo "== tier 8: the interpreter semantics matrix =="
 run "the round trip holds under all three EOF conventions" sh -c '
     rc=0
     for m in unchanged zero minus1; do
-        BFI_EOF=$m ./build/brainstem -- ./build/bfi bf/ctl/hello.bf >/dev/null 2>&1             || { echo "failed under BFI_EOF=$m"; rc=1; }
+        BFI_EOF=$m ./build/brainstem -- ./build/bfi bf/ctl/hello.bf >/dev/null </dev/null 2>&1             || { echo "failed under BFI_EOF=$m"; rc=1; }
     done
     exit $rc'
 
@@ -724,12 +740,12 @@ echo "== tier 9: deadlock and timeout =="
 # "timed out", which points at everything except the cause. A suite that can
 # hang is a suite nobody will run, so every case here is bounded.
 run "a buffering interpreter is diagnosed, not hung" sh -c '
-    BFI_FLUSH=block ./build/brainstem --hello-timeout 1500 -- ./build/bfi bf/ctl/hello.bf         >/dev/null 2>&1; test $? -eq 71'
+    BFI_FLUSH=block ./build/brainstem --hello-timeout 1500 -- ./build/bfi bf/ctl/hello.bf         >/dev/null </dev/null 2>&1; test $? -eq 71'
 run "the diagnosis names buffering as the cause" sh -c '
-    BFI_FLUSH=block ./build/brainstem --hello-timeout 1500 -- ./build/bfi bf/ctl/hello.bf 2>&1         | grep -q "buffering its stdout"'
+    BFI_FLUSH=block ./build/brainstem --hello-timeout 1500 -- ./build/bfi bf/ctl/hello.bf </dev/null 2>&1         | grep -q "buffering its stdout"'
 run "--check-interpreter accepts the vendored interpreter"     ./build/brainstem --check-interpreter ./build/bfi
 run "--check-interpreter rejects a buffering one" sh -c '
-    BFI_FLUSH=block ./build/brainstem --check-interpreter ./build/bfi >/dev/null 2>&1; test $? -eq 72'
+    BFI_FLUSH=block ./build/brainstem --check-interpreter ./build/bfi >/dev/null </dev/null 2>&1; test $? -eq 72'
 
 # TIER 10
 echo
@@ -767,34 +783,34 @@ export BS_NORM
 
 
 run "clock.bf under a frozen clock matches the pinned trace" sh -c '
-    ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
+    ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/clock.frozen.txt "$BS_TMP/obs"'
 run "clock.bf under a virtual clock matches the pinned trace" sh -c '
-    ./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
+    ./build/brainstem --trace --clock virtual=100,step=1000000 -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/clock.virtual.txt "$BS_TMP/obs"'
 run "badclock.bf matches the pinned trace" sh -c '
-    ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/badclock.bf 2>&1 >/dev/null \
+    ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/badclock.bf </dev/null 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/badclock.frozen.txt "$BS_TMP/obs"'
 run "bytes.bf under a seed matches the pinned trace" sh -c '
-    ./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null \
+    ./build/brainstem --trace --seed 000102030405060708090a0b0c0d0e0f -- ./build/bfi bf/rand/bytes.bf </dev/null 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/rand.seeded.txt "$BS_TMP/obs"'
 run "hello.bf matches the pinned trace" sh -c '
-    ./build/brainstem --trace --clock frozen=0 --seed 00000000000000000000000000000000 -- ./build/bfi bf/ctl/hello.bf 2>&1 >/dev/null \
+    ./build/brainstem --trace --clock frozen=0 --seed 00000000000000000000000000000000 -- ./build/bfi bf/ctl/hello.bf </dev/null 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/ctl.hello.txt "$BS_TMP/obs"'
 
 run "roundtrip.bf matches the pinned trace" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/fs.roundtrip.txt "$BS_TMP/obs"'
 run "refused.bf matches the pinned trace" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf 2>&1 >/dev/null \
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/refused.bf" </dev/null) 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/fs.refused.txt "$BS_TMP/obs"'
 # The mtime mask must not eat the rest of the stat record. A file of a
@@ -802,7 +818,7 @@ run "refused.bf matches the pinned trace" sh -c '
 # more than it says it does.
 run "the stat mask does not swallow the record around it" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
-    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+    (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null \
         | sed "$BS_NORM" | grep -q "^brainstem: < 00 len=32 01010100020000000000000" || exit 1
     exit 0'
 
@@ -817,15 +833,15 @@ run "the platform byte is the one this kernel should report" sh -c '
         Linux)   want=02 ;;
         *)       echo "no expectation for $(uname -s)"; exit 1 ;;
     esac
-    got=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf 2>&1 >/dev/null \
-          | sed -n "s/^brainstem: < 00 len=48 .\{40\}\(..\).*/\1/p")
+    got=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < 00 len=[0-9]* 4253544d.\{32\}\(..\).*/\1/p")
     test "$got" = "$want"'
 
 # The pinned traces must actually be able to fail. A normalisation that ate
 # too much would make every one of them pass against anything, and nothing
 # above would notice.
 run "the pinned traces are not vacuous" sh -c '
-    ./build/brainstem --trace --clock frozen=1700000001 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
+    ./build/brainstem --trace --clock frozen=1700000001 -- ./build/bfi bf/time/clock.bf </dev/null 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     if cmp -s "$BS_TMP/obs" tests/trace/clock.frozen.txt; then
         echo "a different epoch produced an identical trace: the mask eats too much"

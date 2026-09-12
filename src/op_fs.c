@@ -46,6 +46,33 @@ static bs_err want_dir(bs_u32 h, bs_u16 rights, struct bs_slot **out) {
     return BS_OK;
 }
 
+/* Resolve the `dir` field of a path op.
+ *
+ * BS_HANDLE_NONE means "the way any other process would": against the
+ * broker's own working directory, or absolutely if the path begins with '/'.
+ * That is the ordinary case now, and a real directory handle is the special
+ * one -- it is openat-beneath, which readdir needs and which a program
+ * walking a tree will want.
+ *
+ * There is no parent to inherit rights from in the NONE case, so the mask is
+ * everything: what the resulting handle can do is decided by the flags the
+ * open asked for, and by the kernel. Rights still narrow through derived
+ * handles; they are simply no longer bounded by a command line. */
+static bs_err resolve_dir(bs_u32 h, bs_u16 need, bs_osfd *fd, bs_u16 *parent) {
+    struct bs_slot *d;
+    bs_err e;
+    if (h == BS_HANDLE_NONE) {
+        *fd = BS_OSFD_CWD;
+        *parent = 0xFFFFu;
+        return BS_OK;
+    }
+    e = want_dir(h, need, &d);
+    if (e != BS_OK) return e;
+    *fd = d->fd;
+    *parent = d->rights;
+    return BS_OK;
+}
+
 /* Copy the rest of the payload out as a path, having checked it.
  *
  * The rule itself lives in path.c, because op_proc needs the same one and a
@@ -78,8 +105,8 @@ bs_err op_fs_open(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
     char path[BS_PATH_MAX];
     bs_u32 dh;
     unsigned int oflags, mode;
-    struct bs_slot *d;
-    bs_osfd fd;
+    bs_osfd dfd, fd;
+    bs_u16 parent;
     bs_u32 h;
     bs_u16 need = BS_R_READ, give;
     bs_err e;
@@ -105,10 +132,10 @@ bs_err op_fs_open(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
      * do more than the preopen it descends from. */
     if (oflags & BS_O_WRITE)  need = (bs_u16)(need | BS_R_WRITE);
     if (oflags & BS_O_CREATE) need = (bs_u16)(need | BS_R_CREATE);
-    e = want_dir(dh, need, &d);
+    e = resolve_dir(dh, need, &dfd, &parent);
     if (e != BS_OK) return e;
 
-    e = sys_open(d->fd, path, oflags, mode & 0777u, &fd);
+    e = sys_open(dfd, path, oflags, mode & 0777u, &fd);
     if (e != BS_OK) return e;
 
     /* The kind comes from the descriptor, not from the flags. A program can
@@ -116,7 +143,7 @@ bs_err op_fs_open(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
      * was a guess would be refused by the wrong op later. */
     if (sys_stat(fd, 0, 0, &st) != BS_OK) { sys_close(fd); return BS_IO; }
 
-    give = (bs_u16)(d->rights & ((oflags & BS_O_READ  ? BS_R_READ  : 0) |
+    give = (bs_u16)(parent & ((oflags & BS_O_READ  ? BS_R_READ  : 0) |
                                  (oflags & BS_O_WRITE ? BS_R_WRITE : 0) |
                                  BS_R_SEEK | BS_R_CREATE | BS_R_DELETE | BS_R_LIST));
     /* A regular file cannot be listed and a directory cannot be seeked
@@ -169,7 +196,8 @@ bs_err op_fs_stat(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
     char path[BS_PATH_MAX];
     bs_u32 dh;
     unsigned int flags;
-    struct bs_slot *d;
+    bs_osfd dfd = BS_OSFD_CWD;
+    bs_u16 parent;
     bs_stat st;
     bs_err e;
     (void)ctx;
@@ -184,10 +212,22 @@ bs_err op_fs_stat(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
     /* A path stats beneath a directory; an empty path stats whatever the
      * handle is, which may be a file. So the directory requirement applies
      * only when there is something to resolve. */
-    e = path[0] ? want_dir(dh, BS_R_READ, &d) : want(dh, BS_R_READ, &d);
+    /* A path stats beneath a directory; an empty path stats whatever the
+     * handle is, which may be a file -- so the directory requirement applies
+     * only when there is something to resolve. An empty path with no handle
+     * at all would be asking about nothing, and is INVAL. */
+    if (path[0]) {
+        e = resolve_dir(dh, BS_R_READ, &dfd, &parent);
+    } else if (dh == BS_HANDLE_NONE) {
+        return BS_INVAL;
+    } else {
+        struct bs_slot *d;
+        e = want(dh, BS_R_READ, &d);
+        if (e == BS_OK) dfd = d->fd;
+    }
     if (e != BS_OK) return e;
 
-    e = sys_stat(d->fd, path, (flags & 1u) ? 1 : 0, &st);
+    e = sys_stat(dfd, path, (flags & 1u) ? 1 : 0, &st);
     if (e != BS_OK) return e;
 
     bs_put_u8 (rep, st.type);
@@ -264,7 +304,8 @@ bs_err op_fs_unlink(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) 
     char path[BS_PATH_MAX];
     bs_u32 dh;
     unsigned int flags;
-    struct bs_slot *d;
+    bs_osfd dfd;
+    bs_u16 parent;
     bs_err e;
     (void)ctx; (void)rep;
 
@@ -274,10 +315,10 @@ bs_err op_fs_unlink(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) 
 
     e = path_of(req, path, sizeof path, 0);
     if (e != BS_OK) return e;
-    e = want_dir(dh, BS_R_DELETE, &d);
+    e = resolve_dir(dh, BS_R_DELETE, &dfd, &parent);
     if (e != BS_OK) return e;
 
-    return sys_unlink(d->fd, path, (flags & 1u) ? 1 : 0);
+    return sys_unlink(dfd, path, (flags & 1u) ? 1 : 0);
 }
 
 /* ABI.md section 7.22. Request: dir{u32} mode{u16} path. */
@@ -285,7 +326,8 @@ bs_err op_fs_mkdir(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
     char path[BS_PATH_MAX];
     bs_u32 dh;
     unsigned int mode;
-    struct bs_slot *d;
+    bs_osfd dfd;
+    bs_u16 parent;
     bs_err e;
     (void)ctx; (void)rep;
 
@@ -295,10 +337,10 @@ bs_err op_fs_mkdir(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
 
     e = path_of(req, path, sizeof path, 0);
     if (e != BS_OK) return e;
-    e = want_dir(dh, BS_R_CREATE, &d);
+    e = resolve_dir(dh, BS_R_CREATE, &dfd, &parent);
     if (e != BS_OK) return e;
 
-    return sys_mkdir(d->fd, path, mode & 0777u);
+    return sys_mkdir(dfd, path, mode & 0777u);
 }
 
 /* ABI.md section 7.23. Request: olddir{u32} newdir{u32} oldlen{u16}
@@ -315,7 +357,8 @@ bs_err op_fs_rename(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) 
     char oldp[BS_PATH_MAX], newp[BS_PATH_MAX];
     bs_u32 odh, ndh;
     unsigned int olen, nlen;
-    struct bs_slot *od, *nd;
+    bs_osfd ofd, nfd;
+    bs_u16 parent;
     const unsigned char *p;
     bs_err e;
     (void)ctx; (void)rep;
@@ -356,10 +399,10 @@ bs_err op_fs_rename(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) 
         if (e != BS_OK) return e;
     }
 
-    e = want_dir(odh, BS_R_DELETE, &od);
+    e = resolve_dir(odh, BS_R_DELETE, &ofd, &parent);
     if (e != BS_OK) return e;
-    e = want_dir(ndh, BS_R_CREATE, &nd);
+    e = resolve_dir(ndh, BS_R_CREATE, &nfd, &parent);
     if (e != BS_OK) return e;
 
-    return sys_rename(od->fd, oldp, nd->fd, newp);
+    return sys_rename(ofd, oldp, nfd, newp);
 }

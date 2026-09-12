@@ -36,6 +36,12 @@
  * EXHAUSTED, which is a status a program can act on. */
 #define BS_HANDLES 128
 
+/* "No handle", where an op accepts an absence. ABI.md section 5 has always
+ * specified this value; since the preopen model was removed it is also how a
+ * program says "resolve this path the way any other process would" -- against
+ * the broker's own working directory, or absolutely. */
+#define BS_HANDLE_NONE 0xFFFFFFFFu
+
 /* Kinds. THESE ARE THE WIRE VALUES from ABI.md section 8.2, so the preopen
  * table can report them without a second mapping -- a second mapping being
  * how a kind comes to mean two things. */

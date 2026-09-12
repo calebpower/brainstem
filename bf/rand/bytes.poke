@@ -15,7 +15,7 @@
 #
 #   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
 EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
-READ 51
+READ 107
 #   random_bytes  op 04, len 2, n = 0x0010 = 16, little endian
 EMIT 04 02 00 10 00
 #   reply is status{1} len{2} then sixteen bytes: nineteen

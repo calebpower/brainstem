@@ -9,8 +9,10 @@
 # primitives can be chained by a brainfuck program rather than by a shell
 # script, which is what the BoneMesh keyschedule conformance check needs.
 #
-# Run against a directory the suite prepares with the interpreter and
-# echo.bf in it, preopened as "work".
+# The suite runs it with the broker's working directory set to a scratch
+# directory holding the interpreter and echo.bf, so "bfi" resolves there --
+# the same way it would for any other process. Handles 1, 2 and 3 are the
+# broker's own stdio, so the first pipe comes back as 4 and 5.
 #
 # WATCH THE CLOSES. After spawn, the outer program closes its own copies of
 # the child's two ends. Without that the child never sees end of input on its
@@ -20,26 +22,27 @@
 #
 # Frames transcribed by hand from ABI.md sections 3, 7.10 to 7.16.
 #
-#   hello  op 01, len 10.  One preopen: 3 + 48 + 12 + 5 = 68.
+#   hello  op 01, len 10.  104 bytes of record back.
 EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
-READ 68
-#   pipe  op 0e, flags 0.  Handles 2 (read) and 3 (write): the outer program
-#   writes into 3 and the child reads from 2.
+READ 107
+#   pipe  op 0e, flags 0.  Handles 4 (read) and 5 (write): the outer program
+#   writes into 5 and the child reads from 4.
 EMIT 0e 02 00 00 00
 READ 11
-#   pipe again.  Handles 4 (read) and 5 (write): the child writes into 5 and
-#   the outer program reads from 4.
+#   pipe again.  Handles 6 (read) and 7 (write): the child writes into 7 and
+#   the outer program reads from 6.
 EMIT 0e 02 00 00 00
 READ 11
 #   spawn  op 0f, len 0x35 = 53.
-#     dir 1, flags 0, nfdmap 2, nargv 2, nenv 1, reserved 0
-EMIT 0f 35 00 01 00 00 00 00 00 02 02 01 00
-#     the descriptor map: child fd 0 gets handle 2, child fd 1 gets handle 5.
+#     dir ffffffff meaning the broker's working directory, flags 0,
+#     nfdmap 2, nargv 2, nenv 1, reserved 0
+EMIT 0f 35 00 ff ff ff ff 00 00 02 02 01 00
+#     the descriptor map: child fd 0 gets handle 4, child fd 1 gets handle 7.
 #     ANY CHILD DESCRIPTOR NOT NAMED HERE IS CLOSED, so the child gets these
 #     two and nothing else -- not even the broker's stderr.
-EMIT 00 02 00 00 00
-EMIT 01 05 00 00 00
-#     the path, u16 prefixed: "bfi", relative to the preopened directory
+EMIT 00 04 00 00 00
+EMIT 01 07 00 00 00
+#     the path, u16 prefixed: "bfi"
 EMIT 03 00 62 66 69
 #     argv: "bfi", "echo.bf"
 EMIT 03 00 62 66 69
@@ -49,38 +52,38 @@ EMIT 07 00 65 63 68 6f 2e 62 66
 #     and echo.bf needs it, because the interpreter's default leaves the cell
 #     unchanged at end of input and its loop would never terminate.
 EMIT 0c 00 42 46 49 5f 45 4f 46 3d 7a 65 72 6f
-#     the reply is a process handle: 6
+#     the reply is a process handle: 8
 READ 7
 #   close the outer copies of the child's two ends.  This is the step that is
 #   easy to forget and impossible to debug.
-EMIT 0c 04 00 02 00 00 00
+EMIT 0c 04 00 04 00 00 00
 READ 3
+EMIT 0c 04 00 07 00 00 00
+READ 3
+#   write  op 0b, handle 5, flags 0, "hi" -- into the child's stdin
+EMIT 0b 08 00 05 00 00 00 00 00 68 69
+READ 5
+#   close handle 5, so the child sees end of input and stops
 EMIT 0c 04 00 05 00 00 00
 READ 3
-#   write  op 0b, handle 3, flags 0, "hi" -- into the child's stdin
-EMIT 0b 08 00 03 00 00 00 00 00 68 69
-READ 5
-#   close handle 3, so the child sees end of input and stops
-EMIT 0c 04 00 03 00 00 00
-READ 3
-#   read  op 0a, handle 4, n 8 -- the child's stdout.  Two bytes: "hi", which
+#   read  op 0a, handle 6, n 8 -- the child's stdout.  Two bytes: "hi", which
 #   went out through one pipe, through a second brainfuck program, and back
 #   through another.
-EMIT 0a 08 00 04 00 00 00 08 00 00 00
+EMIT 0a 08 00 06 00 00 00 08 00 00 00
 READ 5
 #   read again: the child has exited and closed its end, so this is END with
 #   an empty payload
-EMIT 0a 08 00 04 00 00 00 08 00 00 00
+EMIT 0a 08 00 06 00 00 00 08 00 00 00
 READ 3
-#   wait  op 10, handle 6, flags 0 -- blocking.  state 1 exited, code 0.
-EMIT 10 06 00 06 00 00 00 00 00
+#   wait  op 10, handle 8, flags 0 -- blocking.  state 1 exited, code 0.
+EMIT 10 06 00 08 00 00 00 00 00
 READ 7
 #   wait again: idempotent after reaping, from the cached status
-EMIT 10 06 00 06 00 00 00 00 00
+EMIT 10 06 00 08 00 00 00 00 00
 READ 7
-EMIT 0c 04 00 04 00 00 00
-READ 3
 EMIT 0c 04 00 06 00 00 00
+READ 3
+EMIT 0c 04 00 08 00 00 00
 READ 3
 #   exit  op 02, len 1, code 0
 EMIT 02 01 00 00

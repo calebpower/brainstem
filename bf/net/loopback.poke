@@ -22,18 +22,20 @@
 #
 # Frames transcribed by hand from ABI.md sections 3, 6, 7.5 to 7.9 and 7.10.
 #
-#   hello  op 01, len 10.  No preopens here: this program touches no
-#   filesystem at all, which is also the point -- see ABI.md section 8.1.
+#   hello  op 01, len 10.  This program touches no filesystem at all; the
+#   three handles it is given back are the broker's own stdio and it
+#   ignores them.
 EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
-READ 51
-#   socket  op 05, domain 1 IPv4, type 1 stream, protocol 0.  Handle 1.
+READ 107
+#   socket  op 05, domain 1 IPv4, type 1 stream, protocol 0.  Handle 4 --
+#   handles 1, 2 and 3 are always the broker's stdin, stdout and stderr.
 EMIT 05 03 00 01 01 00
 READ 7
 #   bind  op 07, handle 1, flags 1 REUSEADDR, then the 32 byte address:
 #   family 01, reserved 00, port 0000 meaning "any", then 127.0.0.1 in
 #   READING ORDER and twenty four zero bytes.  Those zeros cost nothing to
 #   emit -- '.' on a cell never touched -- and buy a constant offset.
-EMIT 07 26 00 01 00 00 00 01 00
+EMIT 07 26 00 04 00 00 00 01 00
 EMIT 01 00 00 00 7f 00 00 01
 EMIT 00 00 00 00 00 00 00 00 00 00 00 00
 EMIT 00 00 00 00 00 00 00 00 00 00 00 00
@@ -44,14 +46,14 @@ READ 5
 >,>,<<
 #   and the remaining twenty eight bytes of the address record
 READ 28
-#   listen  op 08, handle 1, backlog 0 meaning 128
-EMIT 08 06 00 01 00 00 00 00 00
+#   listen  op 08, handle 4, backlog 0 meaning 128
+EMIT 08 06 00 04 00 00 00 00 00
 READ 3
-#   socket  op 05 again.  Handle 2, the client.
+#   socket  op 05 again.  Handle 5, the client.
 EMIT 05 03 00 01 01 00
 READ 7
-#   connect  op 06, handle 2, flags 0, family 01, reserved 00 ...
-EMIT 06 26 00 02 00 00 00 00 00 01 00
+#   connect  op 06, handle 5, flags 0, family 01, reserved 00 ...
+EMIT 06 26 00 05 00 00 00 00 00 01 00
 #   ... then the port this program was given, straight out of cells 1 and 2 ...
 >.>.<<
 #   ... then 127.0.0.1 and twenty four zeros.
@@ -59,23 +61,23 @@ EMIT 7f 00 00 01
 EMIT 00 00 00 00 00 00 00 00 00 00 00 00
 EMIT 00 00 00 00 00 00 00 00 00 00 00 00
 READ 3
-#   accept  op 09, handle 1, flags 0.  The reply is a handle and the peer
-#   address: 3 header + 4 + 32 = 39 bytes.  Handle 3.
-EMIT 09 06 00 01 00 00 00 00 00
+#   accept  op 09, handle 4, flags 0.  The reply is a handle and the peer
+#   address: 3 header + 4 + 32 = 39 bytes.  Handle 6.
+EMIT 09 06 00 04 00 00 00 00 00
 READ 39
-#   write  op 0b, handle 2 (the client end), flags 0, "hi"
-EMIT 0b 08 00 02 00 00 00 00 00 68 69
+#   write  op 0b, handle 5 (the client end), flags 0, "hi"
+EMIT 0b 08 00 05 00 00 00 00 00 68 69
 READ 5
-#   read  op 0a, handle 3 (the accepted end), n 8, flags 0.  Two bytes come
+#   read  op 0a, handle 6 (the accepted end), n 8, flags 0.  Two bytes come
 #   back, and they came through a real TCP socket.
-EMIT 0a 08 00 03 00 00 00 08 00 00 00
+EMIT 0a 08 00 06 00 00 00 08 00 00 00
 READ 5
 #   close all three, youngest first
-EMIT 0c 04 00 03 00 00 00
+EMIT 0c 04 00 06 00 00 00
 READ 3
-EMIT 0c 04 00 02 00 00 00
+EMIT 0c 04 00 05 00 00 00
 READ 3
-EMIT 0c 04 00 01 00 00 00
+EMIT 0c 04 00 04 00 00 00
 READ 3
 #   exit  op 02, len 1, code 0
 EMIT 02 01 00 00

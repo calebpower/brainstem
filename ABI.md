@@ -27,7 +27,7 @@ program's own `,` and `.`.
 
 **The program's stdin and stdout are consumed by the protocol.** There is no
 second channel and no escape. A program that wants to write to a terminal asks
-for a preopened handle on one (§8) and uses `write`. The broker's diagnostics
+for one of the standard handles (§8.1) and uses `write`. The broker's diagnostics
 go to the broker's own stderr; the interpreter's stderr is passed through
 untouched.
 
@@ -155,13 +155,13 @@ second `hello` is `REHELLO` and fatal.
 | 23 | u8 | reserved, 0 |
 | 24 | u32 LE | `clock_step_ns` — virtual-clock advance per request; 0 otherwise |
 | 28 | u8[16] | `seed` — the RNG seed in use, or 16 zero bytes when `rng_mode` is 0 |
-| 44 | u16 LE | `npreopen` |
+| 44 | u16 LE | `nhandle` — how many handles the program starts with |
 | 46 | u16 LE | `nametail_len` |
-| 48 | `npreopen` × 12 | the preopen table (§8.2) |
-| … | `nametail_len` | the name tail: `npreopen` × (`namelen{u8}` ‖ `name`) |
+| 48 | `nhandle` × 12 | the handle table (§8.2) |
+| … | `nametail_len` | the name tail: `nhandle` × (`namelen{u8}` ‖ `name`) |
 
-A program that does not care about preopen names reads `48 + 12·npreopen`
-bytes and counts down `nametail_len` to drain. One that does care walks the
+A program that does not care about the names reads `48 + 12·nhandle` bytes
+and counts down `nametail_len` to drain. One that does care walks the
 tail with a `u8` counter per entry. Both are flat loops.
 
 `feature_lo`/`feature_hi` report what is available **before the program tries**,
@@ -353,7 +353,7 @@ length differs by family. None of that is a program's problem.
 
 For IPv4, bytes 4–7 are the quad **in reading order** — `127.0.0.1` is
 `7F 00 00 01` — and 8–31 are zero. For IPv6, bytes 4–19 are the sixteen octets
-in reading order and 20–31 are zero. For Unix, byte 4 is a preopened directory
+in reading order and 20–31 are zero. For Unix, byte 4 is a directory
 handle index, byte 5 is a path length 1–26, and bytes 6–31 are the relative
 path zero-padded.
 
@@ -374,7 +374,7 @@ ordinary engineering instinct.
 
 ## 7. The operations
 
-Shared shapes: `handle{u32 LE}`; `dir{u32 LE}` is a preopened directory a
+Shared shapes: `handle{u32 LE}`; `dir{u32 LE}` is a directory handle, or `0xFFFFFFFF` for the broker's working directory (§8); a
 relative path resolves beneath; a path is `pathlen{u16 LE} ‖ path` with no NUL
 terminator, no embedded NUL, and no `..` component.
 
@@ -441,7 +441,7 @@ the ABI at all tells it "no such thing", and collapsing the two sends someone
 looking at their own encoder.
 
 The reason is the same one that keeps `RENAME_NOREPLACE` out of §7.23. A Unix
-socket address in this ABI is a preopened directory handle plus a relative
+socket address in this ABI is a directory handle plus a relative
 path, because there are no absolute paths here. FreeBSD has `bindat(2)` and
 `connectat(2)`, which take exactly that. Linux has neither, and the
 workarounds — `fchdir` around the call, or `/proc/self/fd/N` — are
@@ -487,7 +487,7 @@ program hitting a dead peer mid-write is abandoning the connection anyway.
 
 ### 7.12 `close` — `handle`
 
-Closing a preopen is permitted and permanent. Closing a closed handle is
+Closing a standard handle is permitted and permanent. Closing a closed handle is
 `BADF`. The slot returns to the pool immediately and its generation
 increments — required for determinism, not an implementation detail.
 
@@ -640,87 +640,75 @@ secondary platform.
 
 ---
 
-## 8. Capabilities and preopens
+## 8. Reachability
 
-**Nothing is reachable that was not named on the broker's command line.** There
-are no absolute paths in this ABI; every filesystem op resolves beneath a
-preopened directory. Default policy is deny: with no flags, only `hello`,
-`exit`, `clock_now` and `random_bytes` work.
+**A brainstem program sees the system its broker sees.** Paths are ordinary
+paths: absolute, or relative to the broker's own working directory. A `dir`
+field of `0xFFFFFFFF` — "no handle", §5 — means exactly that, and a real
+directory handle means resolve beneath it, which is what `readdir` needs and
+what a program walking a tree wants.
 
-This is a usability and determinism feature. **It is not a containment claim** —
-see the non-goals in CONVENTIONS.
+There is no capability gate on anything. `socket` succeeds, `connect` reaches
+whatever the host routes to, `spawn` runs what it is told to run, and `open`
+opens what its path names. **brainstem runs with the credentials of whoever
+started it and confines nothing.** CONVENTIONS' named non-goals say the same
+thing in one line: this is not a sandbox. Do not run brainfuck you did not
+write.
 
-### 8.0 What enforces it, exactly
+### 8.0 What this replaced, and why
 
-An earlier draft of this section said escape was refused by the kernel rather
-than by string matching in the broker. **That is not true as of M4 and the
-sentence has been corrected rather than left to flatter the design.** What
-actually happens today:
+Version 1.0 of this document specified a **preopen model**: no absolute paths,
+every filesystem op resolving beneath a directory named on the command line,
+and "default policy is deny". It was removed before the ABI was frozen, and
+the reasoning is recorded because the design was wrong in an instructive way.
 
-| refusal | by |
+It cost the project's central goal and bought nothing it claimed. brainstem
+exists to make an operating system **visible to a brainfuck program**. A
+preopen is reachable only through a handle INDEX that the operator and the
+program must agree on out of band — and there was deliberately no
+name-discovery op, because a brainfuck program cannot usefully compare
+strings. So the one interface a program had to the outside world was the one
+kind of coordination brainfuck is worst at.
+
+A literal path is the opposite: `/etc/hostname` is fourteen bytes to emit, and
+emitting literal bytes is the single thing brainfuck is good at. The cost
+model that made `poll` return one byte per condition and `readdir` return one
+entry per call points the same way here.
+
+And it was never containment. Both the original §8 and the guide said so
+explicitly — "a usability and determinism feature", "emphatically not a
+security boundary" — while the mechanism claimed otherwise. Two sentences in
+this document had drifted into describing a policy that the project's own
+non-goals disclaimed, and one of them ("escape is refused by the kernel")
+was never true at all.
+
+What survives from it: rights still narrow through derived handles, so a file
+opened read-only cannot be written; handles are still generation-tagged; and
+the kernel still decides what the broker's credentials may touch.
+
+### 8.1 The three standard handles
+
+Every program starts with three, before its first frame, with no flag and no
+command line:
+
+| handle | is |
 |---|---|
-| an absolute path | the broker, `INVAL` |
-| any `..` component, anywhere in the path | the broker, `DENIED` |
-| a path containing a NUL byte | the broker, `INVAL` |
-| a **symlink** pointing outside the preopen | **nothing** |
+| 1 | the broker's stdin |
+| 2 | the broker's stdout |
+| 3 | the broker's stderr |
 
-The last row is the honest gap. A string check cannot see through a symlink,
-so a preopened directory containing one is not confined. Both platforms can
-close it in the kernel and neither does it the same way — FreeBSD has
-`O_RESOLVE_BENEATH` as a plain open flag, Linux has the equivalent only
-through `openat2` — so both land at M8 beside `sys_lockdown()`, which is the
-milestone where confinement stops being a usability feature and becomes a
-claim. `sys_beneath_is_kernel()` reports which mechanism is in force, and it
-returns 0 on both platforms today.
+Writing to handle 2 prints. That is the whole interface, and it works whether
+the broker's stdout is a terminal, a file or a pipe.
 
-Until then: **the preopen set bounds what a program can NAME, not what it can
-REACH.** Do not preopen a directory whose contents you do not control and
-expect the result to be a sandbox. brainstem is not a sandbox (CONVENTIONS,
-named non-goals), and this is one of the reasons why.
+They are reported in the hello reply's handle table (§8.2) with their names
+and their actual kinds, so a program that wants to know whether it is talking
+to a terminal or a pipe can look rather than assume. A program that does not
+care can just write.
 
-### 8.1 The network is NOT bounded by this, and that is an open question
+This is the one thing a path cannot portably express — a descriptor the broker
+was handed by a shell — which is why it is the one thing that is handed over.
 
-Section 8 says "no ambient network access". **As of M5 that is false and the
-sentence is corrected here rather than left standing.** `socket` succeeds with
-no flag, and `connect` will reach any address the host can route to. The
-preopen set bounds the **filesystem** and does not bound the network.
-
-That is not an oversight, it is an unresolved design decision, and it is
-recorded rather than quietly settled in either direction. Making it true would
-need a capability gate on socket creation — and the project's own milestone
-plan says there is no `--allow` capability surface in v1, with the capability
-work arriving at M8 alongside `sys_lockdown()`. Putting one in at M5 would
-contradict that decision; leaving the sentence in contradicted the code. The
-sentence loses.
-
-Until it is settled: **a brainstem program can open a socket to anywhere.**
-Treat the broker as having the network reach of the account it runs as,
-because it does.
-
-`--preopen-listen` and `--preopen-connect` are deferred to M7 for the same
-reason. They are capability plumbing, and plumbing whose value depends
-entirely on how the question above is answered should land with that answer
-rather than before it.
-
-### 8.1.1 Command line
-
-`--preopen-dir NAME=PATH`, `--preopen-file NAME=PATH:MODE`,
-`--preopen-fd NAME=N`. Handles are assigned in command-line order starting at
-index 1. `--preopen-listen` and `--preopen-connect` are specified above and
-are M7.
-
-**A directory preopen carries `EXEC`**, so `spawn` can run a program out of
-it. Granting it separately needs a syntax for splitting a directory's rights,
-which should arrive with the capability work rather than before it — the same
-reasoning as §8.1. Today the right narrows only through derived handles: a
-file opened out of that directory does not carry it.
-
-Positional, with no name-discovery op. WASI has one because a WASI program can
-usefully compare strings; a brainfuck program cannot, and there is nothing
-intelligent it could do with a name it discovered. What it *can* discover
-cheaply is each preopen's kind, from the table below, at no round-trip cost.
-
-### 8.2 The preopen record — 12 bytes
+### 8.2 The handle table — 12 bytes per entry
 
 | off | width | field |
 |---|---|---|
@@ -732,8 +720,10 @@ cheaply is each preopen's kind, from the table below, at no round-trip cost.
 
 `rights` bits: 1 READ, 2 WRITE, 4 SEEK, 8 CREATE, 16 DELETE, 32 LIST, 64 EXEC,
 128 ACCEPT, 256 CONNECT. A derived handle gets its parent's rights intersected
-with what the operation asked for. **Rights only ever narrow**, which is what
-makes the preopen set an upper bound on everything the program can ever do.
+with what the operation asked for, so **rights only ever narrow** — a file
+opened read-only stays read-only however it is passed around. That is a
+legibility property, not a containment one: nothing stops the program opening
+the same path again with different flags.
 
 ---
 

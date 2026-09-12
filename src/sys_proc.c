@@ -124,7 +124,9 @@ bs_err sys_spawn(bs_osfd dir, const char *path,
          * place fchdir is safe: nothing else in this process can observe the
          * working directory changing because there is nothing else in this
          * process. */
-        if (fchdir(fdof(dir)) != 0) _exit(126);
+        /* BS_OSFD_CWD means "wherever the broker already is", so there is
+         * nothing to change to. fchdir(AT_FDCWD) is not a thing. */
+        if (dir != BS_OSFD_CWD && fchdir(fdof(dir)) != 0) _exit(126);
         apply_map(map, nmap);
         /* SIGPIPE is ignored in the broker (main.c) and ignoring is inherited
          * across exec, unlike a handler. A child that inherited "ignore"

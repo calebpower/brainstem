@@ -1,72 +1,82 @@
 # roundtrip.poke -- make a file, write it, read it back, rename it, remove it.
 #
-# The M4 fixture: every one of the eleven ops that milestone built, driven by
-# a file containing nothing but the eight brainfuck instructions.
+# The M4 fixture, rewritten when the preopen model was removed. Every path
+# here resolves the way it would for any other process: the directory field is
+# ffffffff, "no handle", which means the broker's own working directory. The
+# suite runs it with that set to a scratch directory, so the trace is a fixed
+# string of bytes without the fixture knowing where it is.
 #
-# It is run against a directory the suite creates fresh, preopened as "work",
-# so the readdir near the end has exactly one entry and the whole trace is a
-# fixed string of bytes.
+# WATCH THE HANDLES. Handles 1, 2 and 3 are always the broker's stdin, stdout
+# and stderr, so the first thing this program opens is handle 4. It opens and
+# closes that slot three times, and each time the generation advances: 4, then
+# 0x00010004, then 0x00020004. That is ABI.md section 5 made visible -- a
+# handle the program closed is not merely stale, it is unforgeable.
 #
-# WATCH THE HANDLES. The first open gets index 2 and the handle is simply 2,
-# because a fresh slot has generation 0. It is closed, and the SECOND open
-# gets the same index back -- lowest free first -- but generation 1, so the
-# handle is 0x00010002 and reads "02 00 01 00" on the wire. That is the whole
-# point of ABI.md section 5 made visible: the program cannot accidentally
-# keep using the first handle, because the first handle is not this one.
+# readdir is the one op that still needs a real directory handle, because the
+# walk lives on it. So the program opens "." to get one, which is also the
+# shortest demonstration of the new model: a literal path, and no coordination
+# with whoever started the broker.
 #
 # Frames transcribed by hand from ABI.md sections 3, 5, 7.10 to 7.23 and 8.
 #
 #   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
 EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
-#   3 header + 48 record + 12 for one preopen + 5 of name tail ("work")
-READ 68
-#   mkdir  op 16, dir 1, mode 0755 = 0x01ed, path "sub"
-EMIT 16 09 00 01 00 00 00 ed 01 73 75 62
+#   3 header + 48 record + 36 of handle table + 20 of name tail
+READ 107
+#   mkdir  op 16, dir ffffffff, mode 0755 = 0x01ed, path "sub"
+EMIT 16 09 00 ff ff ff ff ed 01 73 75 62
 READ 3
-#   open  op 11, dir 1, flags WRITE|CREATE|TRUNC = 0x0016, mode 0644 = 0x01a4,
-#   path "f".  The reply is a status, a length, and a four byte handle.
-EMIT 11 09 00 01 00 00 00 16 00 a4 01 66
+#   open  op 11, flags WRITE|CREATE|TRUNC = 0x0016, mode 0644 = 0x01a4,
+#   path "f".  The reply is a status, a length, and a four byte handle: 4.
+EMIT 11 09 00 ff ff ff ff 16 00 a4 01 66
 READ 7
-#   write  op 0b, handle 2, flags 0, data "hi".  The reply is nwritten, which
+#   write  op 0b, handle 4, flags 0, data "hi".  The reply is nwritten, which
 #   on OK without NOWAIT is always the length asked for -- the broker retried
 #   any short write itself.
-EMIT 0b 08 00 02 00 00 00 00 00 68 69
+EMIT 0b 08 00 04 00 00 00 00 00 68 69
 READ 5
-#   close  op 0c, handle 2.  The slot is free and its generation has moved on.
-EMIT 0c 04 00 02 00 00 00
+#   close  op 0c, handle 4.  The slot is free and its generation has moved on.
+EMIT 0c 04 00 04 00 00 00
 READ 3
-#   open  op 11, dir 1, flags READ = 0x0001, mode 0, path "f".  Same slot,
-#   next generation: the handle comes back as 0x00010002.
-EMIT 11 09 00 01 00 00 00 01 00 00 00 66
+#   open  op 11, flags READ = 0x0001, path "f".  Same slot, next generation:
+#   the handle comes back as 0x00010004.
+EMIT 11 09 00 ff ff ff ff 01 00 00 00 66
 READ 7
-#   read  op 0a, handle 0x00010002, n 8, flags 0.  Two bytes come back.
-EMIT 0a 08 00 02 00 01 00 08 00 00 00
+#   read  op 0a, handle 0x00010004, n 8, flags 0.  Two bytes come back.
+EMIT 0a 08 00 04 00 01 00 08 00 00 00
 READ 5
-#   seek  op 12, handle 0x00010002, offset 0, whence 0 SET.  The reply is the
+#   seek  op 12, handle 0x00010004, offset 0, whence 0 SET.  The reply is the
 #   new position as eight bytes.
-EMIT 12 0d 00 02 00 01 00 00 00 00 00 00 00 00 00 00
+EMIT 12 0d 00 04 00 01 00 00 00 00 00 00 00 00 00 00
 READ 11
-#   close  op 0c, handle 0x00010002
-EMIT 0c 04 00 02 00 01 00
+#   close  op 0c, handle 0x00010004
+EMIT 0c 04 00 04 00 01 00
 READ 3
-#   stat  op 13, dir 1, flags 0, path "f".  Thirty two bytes.
-EMIT 13 07 00 01 00 00 00 00 00 66
+#   stat  op 13, dir ffffffff, flags 0, path "f".  Thirty two bytes.
+EMIT 13 07 00 ff ff ff ff 00 00 66
 READ 35
-#   rename  op 17, olddir 1, newdir 1, oldlen 1, newlen 1, "f" then "g".
-#   Both lengths are in the fixed prefix, so this is a twelve byte header and
-#   two flat runs.
-EMIT 17 0e 00 01 00 00 00 01 00 00 00 01 00 01 00 66 67
+#   rename  op 17, olddir ffffffff, newdir ffffffff, oldlen 1, newlen 1, "f"
+#   then "g".  Both lengths are in the fixed prefix, so this is a twelve byte
+#   header and two flat runs.
+EMIT 17 0e 00 ff ff ff ff ff ff ff ff 01 00 01 00 66 67
 READ 3
-#   unlink  op 15, dir 1, flags 0, path "g"
-EMIT 15 07 00 01 00 00 00 00 00 67
+#   unlink  op 15, dir ffffffff, flags 0, path "g"
+EMIT 15 07 00 ff ff ff ff 00 00 67
 READ 3
-#   readdir  op 14, dir 1, flags 0.  Only "sub" is left, so this is one entry
-#   of type 2 directory, name length 3.
-EMIT 14 06 00 01 00 00 00 00 00
+#   open  op 11, flags READ|DIRECTORY = 0x0041, path ".".  The slot comes back
+#   a third time, as 0x00020004, and this one is a directory handle because
+#   readdir needs somewhere to keep the walk.
+EMIT 11 09 00 ff ff ff ff 41 00 00 00 2e
+READ 7
+#   readdir  op 14, handle 0x00020004, flags 0.  Only "sub" is here, so this
+#   is one entry of type 2 directory, name length 3.
+EMIT 14 06 00 04 00 02 00 00 00
 READ 10
 #   readdir again: the directory is exhausted and the reply is empty, which
 #   is status END and a zero length rather than a payload to parse
-EMIT 14 06 00 01 00 00 00 00 00
+EMIT 14 06 00 04 00 02 00 00 00
+READ 3
+EMIT 0c 04 00 04 00 02 00
 READ 3
 #   exit  op 02, len 1, code 0
 EMIT 02 01 00 00

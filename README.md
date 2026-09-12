@@ -56,12 +56,18 @@ Milestone M6, **gated: 172 pass, 0 fail on `freebsd-15.1` and on
 testing across all twenty three, freezes `ABI.md`, and adds `--replay`. M8
 makes `sys_lockdown()` real.
 
-**Two boundaries worth knowing before you run this.** Filesystem access is
-bounded by what you preopen, with the gap described in ABI.md §8.0. **Network
-access is not bounded at all**, and a directory preopen carries the right to
-*run programs out of it* — see ABI.md §8.1. brainstem is not a sandbox, it
-runs with your credentials, and it can now start processes. Do not run
-brainfuck you did not write.
+**It confines nothing, and that is the design.** A brainstem program sees the
+system its broker sees: paths are absolute or relative to the broker's working
+directory, `connect` reaches whatever the host routes to, and `spawn` runs
+what it is told to. There are no flags for reaching things. An earlier version
+required every directory to be named on the command line; that was removed,
+because a brainfuck program cannot compare strings and so could only reach a
+preopen through a handle index agreed out of band — the one kind of
+coordination brainfuck is worst at, bought for a containment property the
+project never claimed. ABI.md §8.0 has the reasoning.
+
+**So do not run brainfuck you did not write.** It runs with your credentials
+and it can start processes.
 
 ## The operations
 
@@ -73,7 +79,7 @@ Twenty-three, specified in [ABI.md](ABI.md). All built.
 | `clock_now` | realtime and monotonic, steerable with `--clock` |
 | `random_bytes` | from the kernel, or from a seed with `--seed` |
 | `read` `write` `close` `poll` | files, pipes and sockets alike |
-| `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | beneath a preopened directory |
+| `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | ordinary paths, or beneath a directory handle |
 | `socket` `connect` `bind` `listen` `accept` | IPv4 and IPv6; Unix is declared and answers NOTSUP |
 | `pipe` `spawn` `wait` | **how one program drives another** |
 
@@ -143,10 +149,14 @@ is no container lane that could cover the primary target.
 ## Safety
 
 **brainstem is not a sandbox.** It hands the program the filesystem, the
-network and process spawn, with the broker's own credentials. The capability
-model — nothing is reachable that was not named on the command line — is a
-usability feature and a foundation for later enforcement, not a containment
-claim. Do not run a program you did not write.
+network and process spawn, with the broker's own credentials, and confines
+none of it. Do not run a program you did not write.
+
+There was briefly a capability model — nothing reachable that was not named on
+the command line — described even then as "a usability feature, not a
+containment claim". It was removed at M6, because it restricted a program's
+reach for a benefit the project had already disclaimed, and because reaching
+things is what brainstem is FOR. ABI.md §8.0 keeps the reasoning.
 
 It is also not fast, by construction. One byte per `.` through two pipes, and
 an interpreter that spends millions of instructions between syscalls.

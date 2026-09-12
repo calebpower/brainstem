@@ -255,10 +255,16 @@ see.
 
 What brainstem does **not** prove, stated rather than omitted:
 
-- **brainstem is not a sandbox.** It brokers syscalls with its own credentials;
-  it does not confine them. The capability model is a usability and determinism
-  feature and a foundation for tier 12, not a containment claim. Do not run
-  untrusted brainfuck under it.
+- **brainstem is not a sandbox.** It brokers syscalls with its own credentials
+  and confines nothing. A program sees the system its broker sees: ordinary
+  paths, ordinary sockets, ordinary spawn.
+
+  This used to read "the capability model is a usability and determinism
+  feature ... not a containment claim", which was true about the CLAIM and
+  false about the MECHANISM -- there was a preopen model doing real
+  restricting, for a benefit this line already disclaimed. It was removed at
+  M6; ABI.md section 8.0 records why, and the short version is that it cost
+  the project its whole purpose. Do not run brainfuck you did not write.
 - **No timing or side-channel claim**, for the sibling's reasons and one of our
   own: every op crosses two pipes and a process boundary.
 - **Not a performance story.** One byte per `.`, and an interpreter spending
@@ -289,7 +295,7 @@ Milestones, each ending in a committable unit green on **both** guests.
 | **M1** | the frame codec, alone — no process, no descriptor, no platform. |
 | **M2** | a standard brainfuck program completes a round trip. Three `ctl` ops, which do not cross the seam, so deadlock and timeout are settled at zero platform cost **before twenty more ops inherit them**. |
 | **M3** | **done.** The seam, `clock_now` and `random_bytes`, `--seed` and `--clock`, and the two measured tiers. Four of twenty three. |
-| **M4** | **done.** Handles with generations, preopens, and eleven ops: the filesystem and the bytes that move through it. Fifteen of twenty three. |
+| **M4** | **done.** Handles with generations and eleven ops: the filesystem and the bytes that move through it. Fifteen of twenty three. |
 | **M5** | **done.** Five net ops, IPv4 and IPv6. No `netecho` helper was needed: the fixture connects to itself, which removes the second process the plan assumed. Twenty of twenty three. |
 | **M6** | **done.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and a brainfuck program that runs a brainfuck program. |
 | **M7** | the tiers that need all of it: mutation, cross-op metamorphic. ABI frozen. |

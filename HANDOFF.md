@@ -30,6 +30,71 @@ specific FACT about the platform written down instead of a MECHANISM for
 discovering it. Nothing has been guessed since `tests/syscalls/README` started
 labelling unmeasured rows as unmeasured.
 
+### THE PREOPEN MODEL WAS REMOVED, AFTER M6 AND BEFORE THE FREEZE
+
+The largest design change this project has made, and it came from one sentence
+of review: *"I don't really want to preopen anything -- that's not visible by
+bf and the whole point of P1 is to make the system visible and viewable by
+bf."*
+
+**What was there.** No absolute paths. Every filesystem op resolving beneath a
+directory named on the command line with `--preopen-dir`. Handles 1..n handed
+out in command-line order, with a table in the hello reply. "Default policy is
+deny."
+
+**Why it was wrong, and it is worth being precise.** It was not that it was
+insecure. It was that it cost the project its purpose and bought a property
+the project had already disclaimed in writing.
+
+A preopen is reachable only through a handle INDEX that the operator and the
+program have to agree on out of band. There was deliberately no
+name-discovery op, because a brainfuck program cannot usefully compare
+strings -- so the program's only interface to the outside world required the
+one kind of coordination brainfuck is worst at. Meanwhile a literal path is
+the CHEAPEST thing such a program can produce: `/etc/hostname` is fourteen
+bytes to emit, and emitting literal bytes is the single thing brainfuck is
+good at. The same cost model that made `poll` return one byte per condition
+and `readdir` return one entry per call points straight at ordinary paths.
+
+And it never was containment. `CONVENTIONS.md`'s named non-goals have said
+"brainstem is not a sandbox" since the first commit, and the approved plan
+said the broker "hands a brainfuck program the filesystem, network and process
+spawn with its own credentials". The preopen model was doing real restricting
+for a benefit two other documents explicitly denied claiming.
+
+**How the mistake happened, because the shape is worth recognising.** The
+phrase "no ambient network access" entered `GUIDE.md` at M0, in the scaffolding
+commit, when no network op existed. It was *vacuously true* -- there was no
+ambient network access because there was no network access -- and it was
+written as though it described a policy. Then the world changed under it. At
+M5 I read my own M0 sentence as a requirement and escalated it to the user as
+an open design question, when the approved plan had already answered it.
+
+**A sentence that describes the current state of the code, written in the
+present tense, becomes a requirement the moment somebody else reads it.** The
+project already had a defence against this and it was not applied here: fast
+facts get checkers. There was no check that the documents' reachability claims
+matched the binary's behaviour, because nobody can check prose -- which is the
+argument for not writing prose that will expire.
+
+**What replaced it.** `dir = 0xFFFFFFFF` -- "no handle", a value §5 had
+specified all along -- means resolve the path the way any other process would,
+against the broker's working directory or absolutely. A real directory handle
+still means openat-beneath, which `readdir` needs. `src/path.c` now refuses
+exactly two things: an empty path, and one containing a NUL.
+
+And every program gets three handles before its first frame: the broker's
+stdin, stdout and stderr, as 1, 2 and 3. Writing to handle 2 prints. That
+covers the one thing a path cannot portably express -- a descriptor handed
+over by a shell -- and it needs no flag, so there is nothing to agree on.
+
+**The trap that came with it.** The hello reply now reports what those three
+descriptors actually ARE, so it depends on how the broker was invoked: stdin
+as a terminal reports different rights than stdin as /dev/null. That broke
+five pinned traces in a way that looked like a code bug. Every broker
+invocation in `tests/run.sh` now names its own stdin, and there is a comment
+there saying why. Anything else that pins a trace must do the same.
+
 ### The three decisions in M6 worth not relitigating
 
 **fork + fchdir + execve, not posix_spawn, and not fexecve.** The plan called
@@ -77,28 +142,24 @@ twenty three, the metamorphic checks that span ops, freezing `ABI.md`,
 `--replay`, `--sort-readdir`, the capability questions from §8.1, and
 `sys_lockdown()` made real.
 
-### Tier 10a is now pinned for every fixture, on both platforms
+### Tier 10a: five cases pinned, four being re-measured
 
-Nine cases, all measured rather than guessed. The process cases are the
-interesting result: **`proc.drive` and `proc.refused` are byte-identical on
-the two platforms**, which nothing else non-empty in `tests/syscalls/` is.
-spawn is one `fork`, pipe is two `pipe` with four `fcntl` -- two ends of two
-pipes, each marked close-on-exec -- and FreeBSD's `pipe2` normalises to `pipe`
-before the comparison.
+Every fs and proc fixture changed shape when the preopen model was removed, so
+their pinned syscall multisets are stale and the four cases are back in
+`bscalls`' report list. The suite measures and prints them on both guests;
+paste the FreeBSD half in and move them back into `cases()`.
 
-That agreement is worth noticing after M4 and M5, where the same op measured
-differently on the two kernels every time. Those differences were all libc's
--- glibc allocating a `DIR` buffer with `brk`, `arc4random_buf` allocating its
-state with `mmap` and `minherit`. Here the broker does all of the work itself,
-and the two kernels agree exactly. The divergences this project keeps finding
-are not in the kernels; they are in what the C libraries do on the way there.
+Linux currently reports `fs.roundtrip` as 2 brk, 3 fcntl, 6 fstat, 2
+getdents64, 1 lseek, 1 mkdirat, 3 open, 1 renameat, 1 unlinkat; `fs.refused`
+as 2 fstat, 2 open, 1 unlinkat; `proc.drive` as 4 fcntl, 1 fork, 2 pipe; and
+`proc.refused` as 1 fork.
 
-`fork`, `pipe`, `dup2` and `execve` came off the baseline at M6, for the same
-reason `fstat` and `lseek` came off it at M4: the broker's own uses all happen
-before the window opens, so anything the tracer sees afterwards belongs to
-`spawn` and `pipe`. `wait4` stays and is the one genuinely ambiguous entry --
-the broker reaps its own interpreter inside the window, so a count there would
-mix that with `proc.wait`'s.
+The result worth keeping from the last round: **the proc cases measured
+identically on both platforms**, which nothing else non-empty in
+`tests/syscalls/` did. Every earlier divergence was libc's rather than the
+kernel's -- glibc allocating a `DIR` buffer with `brk`, `arc4random_buf`
+allocating its state with `mmap` and `minherit`. Where the broker does the
+work itself, the two kernels agree exactly.
 
 ### What the gate found that this host could not
 
@@ -183,7 +244,7 @@ marker in the suite at all.
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
 | 10 | yes | 10 | platform parity, against traces pinned in tests/trace/ |
-| 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
+| 10a | yes | 1 | per-op syscall surface — ctl, time and rand pinned; fs and proc under re-measurement |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 10 | the tables and the lane definitions agree |
 | 11 | manual | 0 | mutation, a discipline rather than a check |

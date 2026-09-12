@@ -13,7 +13,7 @@
 #
 #   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
 EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
-READ 51
+READ 107
 #   clock_now  op 03, len 1, clock id 2, which is not a clock
 EMIT 03 01 00 02
 #   status 06 INVAL, len 0, and nothing after it

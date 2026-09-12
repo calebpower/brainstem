@@ -109,6 +109,7 @@ bs_err op_proc_spawn(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep)
     bs_u32 dh;
     unsigned int flags, nfdmap, nargv, nenv;
     struct bs_slot *d;
+    bs_osfd dfd;
     char *path;
     bs_i64 pid = 0;
     bs_u32 h;
@@ -173,14 +174,20 @@ bs_err op_proc_spawn(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep)
 
     if (!bs_cur_done(req)) return BS_BADLEN;
 
-    /* EXEC is a right, and it is checked against the directory the path
-     * resolves beneath. A preopen granted for reading is not a preopen you
-     * can run things out of. */
-    e = want(dh, (bs_u16)(BS_R_READ | BS_R_EXEC), &d);
-    if (e != BS_OK) return e;
-    if (d->kind != BS_HK_DIR) return BS_NOTDIR;
+    /* BS_HANDLE_NONE resolves the path the way any other process would:
+     * against the broker's working directory, or absolutely. A real
+     * directory handle makes the child START there instead, which is how a
+     * program runs something out of a tree it has walked to. */
+    if (dh == BS_HANDLE_NONE) {
+        dfd = BS_OSFD_CWD;
+    } else {
+        e = want(dh, (bs_u16)(BS_R_READ | BS_R_EXEC), &d);
+        if (e != BS_OK) return e;
+        if (d->kind != BS_HK_DIR) return BS_NOTDIR;
+        dfd = d->fd;
+    }
 
-    e = sys_spawn(d->fd, path, args.v, envv, map, nfdmap, &pid);
+    e = sys_spawn(dfd, path, args.v, envv, map, nfdmap, &pid);
     if (e != BS_OK) return e;
 
     e = bs_fdtab_alloc(BS_HK_PROC, 0, BS_OSFD_NONE, &h);

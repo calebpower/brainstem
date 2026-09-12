@@ -104,6 +104,14 @@ bs_err sys_lockdown(void);
 typedef bs_i64 bs_osfd;
 #define BS_OSFD_NONE ((bs_osfd)-1)
 
+/* The broker's own working directory, as a descriptor.
+ *
+ * POSIX spells this AT_FDCWD, which is -100 on Linux and -2 on FreeBSD --
+ * a number chosen by an OS header, so it may not appear above the seam any
+ * more than AF_INET6 may. This is brainstem's spelling and sys_posix.c maps
+ * it, in the one function that turns a bs_osfd into an int. */
+#define BS_OSFD_CWD  ((bs_osfd)-3)
+
 /* An open directory, for readdir. Opaque above the seam: only sys_*.c knows
  * this is a DIR *, because DIR is a POSIX type and may not be named in this
  * header. */

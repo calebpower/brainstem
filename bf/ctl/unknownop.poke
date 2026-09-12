@@ -6,7 +6,7 @@
 # it. This program asks for op 0x7e, is told NOSUCHOP, and carries on to
 # exit cleanly -- which is the whole point.
 EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
-READ 51
+READ 107
 #   op 7e does not exist; the reply is a bare status with no payload
 EMIT 7e 00 00
 READ 3

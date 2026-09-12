@@ -108,8 +108,16 @@ bs_err sys_errmap(int e) {
     }
 }
 
-/* Descriptors cross the seam as bs_osfd and are int only in here. */
-static int fdof(bs_osfd f) { return (int)f; }
+/* Descriptors cross the seam as bs_osfd and are int only in here.
+ *
+ * This is also where BS_OSFD_CWD becomes AT_FDCWD. That number is -100 on
+ * Linux and -2 on FreeBSD, so it is exactly the kind of value CONVENTIONS
+ * section 3 forbids above the seam, and exactly the kind of one-line mapping
+ * the seam exists to hold. */
+static int fdof(bs_osfd f) {
+    if (f == BS_OSFD_CWD) return AT_FDCWD;
+    return (int)f;
+}
 
 /* ---- clocks ------------------------------------------------------------- */
 

@@ -1,3 +1,0 @@
-4 fcntl
-1 fork
-2 pipe

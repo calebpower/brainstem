@@ -1,67 +1,73 @@
-# refused.poke -- every way the filesystem ops say no.
+# fs/refused.poke -- the ways the filesystem ops say no, and one way they no
+# longer do.
 #
-# Nine refusals in one conversation, and the conversation CONTINUES THROUGH
-# ALL OF THEM. That is the part worth testing: every status here is
+# The conversation CONTINUES THROUGH ALL OF THEM. Every status here is
 # recoverable, so the error reply carries no payload, the program reads
 # exactly three bytes, and the stream is still in step for the next request.
 # An ABI where a refusal desynced the conversation would be one where a
 # program could not afford to try anything.
 #
-# Run against a directory the suite creates fresh and preopens as "work".
+# TWO REFUSALS WERE DELETED FROM THIS FIXTURE and one success was added in
+# their place. An earlier version checked that ".." and an absolute path were
+# both refused. They are not any more: brainstem exists to make the system
+# visible to a brainfuck program, and refusing a literal path only ever cost
+# reachability -- it never bought containment, because this was never a
+# sandbox. The last case here stats "/" and expects it to WORK.
+#
+# Run with the broker's working directory set to a scratch directory.
 #
 # Frames transcribed by hand from ABI.md sections 4, 5, 7.10 to 7.23 and 8.
 #
 #   hello  op 01, len 10
 EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
-READ 68
-#   open ".." -- DENIED 04. The only relative component that can leave the
-#   directory, refused anywhere in the path rather than only at the front,
-#   because a/../../b climbs just as well.
-EMIT 11 0a 00 01 00 00 00 01 00 00 00 2e 2e
-READ 3
-#   open "/etc" -- INVAL 06. There are no absolute paths in this ABI at all.
-EMIT 11 0c 00 01 00 00 00 01 00 00 00 2f 65 74 63
-READ 3
+READ 107
 #   open "nope" -- NOENT 05
-EMIT 11 0c 00 01 00 00 00 01 00 00 00 6e 6f 70 65
+EMIT 11 0c 00 ff ff ff ff 01 00 00 00 6e 6f 70 65
 READ 3
-#   open "f" with an undeclared flag bit 0x8000 -- INVAL 06. A program built
+#   open "f" with an undeclared flag bit 0x8000 -- INVAL 06.  A program built
 #   against a later minor version must not silently get an open without the
 #   flag it asked for.
-EMIT 11 09 00 01 00 00 00 00 80 a4 01 66
+EMIT 11 09 00 ff ff ff ff 00 80 a4 01 66
 READ 3
-#   read the directory handle itself -- ISDIR 0a. A directory is enumerated
-#   with readdir, never read as bytes; both kernels refuse it and they do not
-#   agree on which errno, which is exactly why this is decided here.
-EMIT 0a 08 00 01 00 00 00 08 00 00 00
+#   open with an EMPTY path -- INVAL 06.  Silently meaning "." would make a
+#   typo succeed.
+EMIT 11 08 00 ff ff ff ff 01 00 00 00
 READ 3
-#   open "f" WRITE|CREATE|TRUNC, mode 0644 -- handle 2
-EMIT 11 09 00 01 00 00 00 16 00 a4 01 66
+#   stat with an empty path AND no handle -- INVAL 06.  An empty path stats
+#   whatever the handle is, and there is no handle here, so this is a question
+#   about nothing.
+EMIT 13 06 00 ff ff ff ff 00 00
+READ 3
+#   open "f" WRITE|CREATE|TRUNC, mode 0644 -- handle 4
+EMIT 11 09 00 ff ff ff ff 16 00 a4 01 66
 READ 7
-#   read from it -- DENIED 04. It was opened write only, and rights only ever
+#   read from it -- DENIED 04.  It was opened write only, and rights only ever
 #   narrow: the handle never had READ to lose.
-EMIT 0a 08 00 02 00 00 00 08 00 00 00
+EMIT 0a 08 00 04 00 00 00 08 00 00 00
 READ 3
-#   readdir on it -- NOTDIR 09, not DENIED. The handle is real and the kind is
+#   readdir on it -- NOTDIR 09, not DENIED.  The handle is real and the kind is
 #   wrong, and the most specific true answer is the useful one.
-EMIT 14 06 00 02 00 00 00 00 00
+EMIT 14 06 00 04 00 00 00 00 00
 READ 3
 #   close it
-EMIT 0c 04 00 02 00 00 00
+EMIT 0c 04 00 04 00 00 00
 READ 3
-#   read handle 2 again -- BADF 03. THE DEFECT THE GENERATION TAG EXISTS FOR.
+#   read handle 4 again -- BADF 03.  THE DEFECT THE GENERATION TAG EXISTS FOR.
 #   The slot is free and may already have been handed to something else; the
 #   old handle names a generation that no longer exists, so this is a clean
 #   refusal instead of a silent read of someone else's file.
-EMIT 0a 08 00 02 00 00 00 08 00 00 00
+EMIT 0a 08 00 04 00 00 00 08 00 00 00
 READ 3
 #   close it again -- BADF 03
-EMIT 0c 04 00 02 00 00 00
+EMIT 0c 04 00 04 00 00 00
 READ 3
-#   unlink "f" so the directory is empty again, leaving nothing behind for
-#   the next fixture that runs here
-EMIT 15 07 00 01 00 00 00 00 00 66
+#   unlink "f", leaving nothing behind for the next fixture that runs here
+EMIT 15 07 00 ff ff ff ff 00 00 66
 READ 3
+#   stat "/" -- OK, and thirty two bytes back.  An ABSOLUTE PATH, which the
+#   preopen model refused and this one does not.  The system is visible.
+EMIT 13 07 00 ff ff ff ff 00 00 2f
+READ 35
 #   exit  op 02, len 1, code 0
 EMIT 02 01 00 00
 READ 3

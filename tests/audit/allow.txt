@@ -71,9 +71,6 @@ main write
 ops fprintf
 ops stderr
 
-# ---- preopen.c: command line words into descriptors ----
-preopen strtol
-
 # ---- the seam, and only the seam, reaches the kernel ----
 #
 # This list IS the answer to "what can brainstem do to a machine". Every line
