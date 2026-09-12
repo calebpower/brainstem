@@ -384,6 +384,24 @@ run "every skeleton has a header naming what it does" sh -c '
     done
     exit $rc'
 
+# A READ RETURNS UP TO n BYTES, so a fixture that asks a pipe or a socket for
+# more than one and then reads a reply sized for more than one is a race. The
+# child in bf/proc is an interpreter with unbuffered output: it emits each
+# byte with its own write, and whether two of them are in the pipe when the
+# read lands is a scheduling question. On an idle eight core development host
+# the answer was always "both", through forty runs under deliberate CPU load.
+# On a loaded single processor guest it is not.
+#
+# Everything in bf/proc and bf/net reads from a stream, so the rule here has
+# no exceptions and needs to know nothing about which handle is which: every
+# read op in those two directories asks for exactly one byte. A program that
+# wants more has to loop, which is what talking to a stream means anyway.
+run "no fixture depends on a stream read returning more than one byte" sh -c '
+    bad=$(grep -h "^EMIT 0a " bf/proc/*.poke bf/net/*.poke \
+          | grep -vE "^EMIT 0a 08 00( [0-9a-f]{2}){4} 01 00 ") || true
+    if [ -n "$bad" ]; then echo "$bad"; exit 1; fi
+    exit 0'
+
 # The expander must stay ignorant of the ABI. This is the line between an
 # expander and a compiler, and it is the same shape of check as the one
 # guarding the lane definitions: if bfgen knew an op name or a length, the

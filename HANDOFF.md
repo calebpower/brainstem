@@ -254,7 +254,7 @@ marker in the suite at all.
 | 1 | yes | 17 | interpreter self-test, all three EOF modes |
 | 2 | yes | 1 | the program is still brainfuck |
 | 3 | yes | 1 | fixture regeneration |
-| 3a | yes | 2 | fixture legibility, and the expander knows no ABI |
+| 3a | yes | 3 | fixture legibility, and the expander knows no ABI |
 | 3b | no | 0 | the header does not lie — needs bsframe --decode wiring |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
 | 5 | yes | 21 | per-op round trip |
@@ -364,23 +364,37 @@ for.
 
 ## Traps that have actually bitten
 
-- **"I am getting nondeterministic testing results" -- and the likeliest cause
-  was a pin, not a race.** For one commit (`7c50226`) tier 10 pinned the hello
-  reply's handle table, which reports what the broker's own stdin, stdout and
-  stderr ARE. Those depend on how the broker was invoked, so seven checks
-  would pass or fail according to how the harness happened to wire its stdio
-  that run. That is indistinguishable from a race at the report level, and it
-  was fixed by masking the table (`2a2fb7d`).
+- **"I am getting nondeterministic testing results", and the attribution
+  changed twice.** Worth reading as a diagnostic story rather than a bug
+  report, because both of my confident answers were wrong in different ways.
 
-  Three back-to-back gate runs after that landed showed no variation.
+  My first answer was the stream read above -- and I could not reproduce it,
+  so I downgraded it. My second answer was a PIN rather than a race: for one
+  commit tier 10 pinned the hello reply's handle table, which reports what the
+  broker's own stdio ARE, so those checks would pass or fail according to how
+  the harness wired its descriptors that run. Indistinguishable from a race at
+  the report level, and a mistake this project had just made three times in an
+  hour.
 
-  **The lesson is the diagnostic one.** Faced with "nondeterministic", the
-  instinct is to hunt for a race, and there WAS a real latent race to find --
-  the stream reads above, worth fixing and never reproduced. But a pinned
-  expectation that encodes something the program does not determine produces
-  exactly the same symptom, and this project had just made that mistake three
-  times in one session. Check what the failing tier PINS before hunting for
-  concurrency.
+  Then the timeline settled it against me. The runs that varied were on the
+  commit where the table was ALREADY masked, and the only change between there
+  and three clean gate runs was the stream read fix. **So the race was the
+  cause after all, and "I could not reproduce it" was the weakest part of the
+  argument, not the strongest.**
+
+  An idle eight core development host lets the child run to completion before
+  the parent reads; a loaded single processor guest interleaves. Forty runs
+  under deliberate CPU load on the wrong machine proves very little about a
+  scheduling window, and I presented it as though it proved something.
+
+  **Two things to take from it.** "Nondeterministic" is already a hypothesis
+  wearing the clothes of an observation -- it names timing as the cause family.
+  The observation is "the same commit gives different results on repeated runs
+  of the same guest", and the question that follows from it is *what is an
+  input to this test that I am not treating as one*. And in a suite built on
+  pinned expectations, a varying result should make you suspect a pin is
+  claiming invariance for something that is not invariant -- check that before
+  hunting for concurrency, and check the dates on both.
 
 - **A read returns UP TO n bytes, and two fixtures assumed exactly n.**
   `bf/proc/drive.poke` asked for eight bytes of the child's output and read a

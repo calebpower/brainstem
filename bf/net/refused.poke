@@ -59,8 +59,12 @@ EMIT 06 26 00 04 00 01 00 00 00 01 00 01 00 7f 00 00 01
 EMIT 00 00 00 00 00 00 00 00 00 00 00 00
 EMIT 00 00 00 00 00 00 00 00 00 00 00 00
 READ 3
-#   read from the listener -- DENIED 04, because listen took the right away
-EMIT 0a 08 00 04 00 01 00 08 00 00 00
+#   read from the listener -- DENIED 04, because listen took the right away.
+#   One byte rather than eight, like every other read in bf/net and bf/proc:
+#   this one is refused before it reaches a stream at all, but the rule has no
+#   exceptions so that a checker can enforce it without knowing which handles
+#   are streams.
+EMIT 0a 08 00 04 00 01 00 01 00 00 00
 READ 3
 EMIT 0c 04 00 04 00 01 00
 READ 3
