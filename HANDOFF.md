@@ -19,8 +19,9 @@ status.
     > 10 len=6      wait handle 6
     < 00 len=4      exited, code 0
 
-**Gated: 172 pass, 0 fail on `freebsd-15.1` and 172 pass, 0 fail on
-`ubuntu-26.04`.** M5 was 159 on both guests, M4 was 148, M3 was 132, M2 was
+**Gated: 173 pass, 0 fail on `freebsd-15.1` and 173 pass, 0 fail on
+`ubuntu-26.04`** -- including the removal of the preopen model, which touched
+every fixture in the tree, and the stream-read fix. M5 was 159 on both guests, M4 was 148, M3 was 132, M2 was
 94, M0 was 22.
 
 M3, M4, M5 and M6 were each written in full before either guest ran them, and
