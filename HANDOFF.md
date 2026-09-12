@@ -19,9 +19,16 @@ status.
     > 10 len=6      wait handle 6
     < 00 len=4      exited, code 0
 
-**Gated on Linux: 172 pass, 0 fail in the container lane. THE FREEBSD HALF OF
-M6 HAS NOT RUN.** M5 was 159 on both guests, M4 was 148, M3 was 132, M2 was
+**Gated: 172 pass, 0 fail on `freebsd-15.1` and 172 pass, 0 fail on
+`ubuntu-26.04`.** M5 was 159 on both guests, M4 was 148, M3 was 132, M2 was
 94, M0 was 22.
+
+M3, M4, M5 and M6 were each written in full before either guest ran them, and
+each passed the primary platform first time. The three FreeBSD failures this
+project has had were all at M2 and M3 and were all the same shape -- a
+specific FACT about the platform written down instead of a MECHANISM for
+discovering it. Nothing has been guessed since `tests/syscalls/README` started
+labelling unmeasured rows as unmeasured.
 
 ### The three decisions in M6 worth not relitigating
 
@@ -70,14 +77,21 @@ twenty three, the metamorphic checks that span ops, freezing `ABI.md`,
 `--replay`, `--sort-readdir`, the capability questions from §8.1, and
 `sys_lockdown()` made real.
 
-### Still unpinned: the proc syscall surface
+### Tier 10a is now pinned for every fixture, on both platforms
 
-`tests/syscalls/*/proc.*` do not exist yet, for the same reason the filesystem
-ones did not at M4: writing FreeBSD expectations from a host that cannot reach
-FreeBSD is guessing, and guessing has cost two round trips already. The suite
-measures and prints them -- `sh tools/bscalls.sh --report` -- and Linux
-currently reports `proc.drive` as 4 fcntl, 1 fork, 2 pipe, and `proc.refused`
-as 1 fork. Paste the FreeBSD half in and move both cases into `cases()`.
+Nine cases, all measured rather than guessed. The process cases are the
+interesting result: **`proc.drive` and `proc.refused` are byte-identical on
+the two platforms**, which nothing else non-empty in `tests/syscalls/` is.
+spawn is one `fork`, pipe is two `pipe` with four `fcntl` -- two ends of two
+pipes, each marked close-on-exec -- and FreeBSD's `pipe2` normalises to `pipe`
+before the comparison.
+
+That agreement is worth noticing after M4 and M5, where the same op measured
+differently on the two kernels every time. Those differences were all libc's
+-- glibc allocating a `DIR` buffer with `brk`, `arc4random_buf` allocating its
+state with `mmap` and `minherit`. Here the broker does all of the work itself,
+and the two kernels agree exactly. The divergences this project keeps finding
+are not in the kernels; they are in what the C libraries do on the way there.
 
 `fork`, `pipe`, `dup2` and `execve` came off the baseline at M6, for the same
 reason `fstat` and `lseek` came off it at M4: the broker's own uses all happen
@@ -169,7 +183,7 @@ marker in the suite at all.
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
 | 10 | yes | 10 | platform parity, against traces pinned in tests/trace/ |
-| 10a | yes | 1 | per-op syscall surface — ctl, time and rand pinned; fs reported only |
+| 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 10 | the tables and the lane definitions agree |
 | 11 | manual | 0 | mutation, a discipline rather than a check |

@@ -51,7 +51,8 @@ That is the capability the whole project was for: **brainfuck itself becomes
 the harness**, able to chain another program's primitives without a shell
 script in the middle.
 
-Milestone M6. What remains is not ops — it is tiers. M7 sweeps mutation
+Milestone M6, **gated: 172 pass, 0 fail on `freebsd-15.1` and on
+`ubuntu-26.04`.** What remains is not ops — it is tiers. M7 sweeps mutation
 testing across all twenty three, freezes `ABI.md`, and adds `--replay`. M8
 makes `sys_lockdown()` real.
 

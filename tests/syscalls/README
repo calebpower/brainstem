@@ -40,13 +40,23 @@ than expected:
               demonstrates "a seed consults no kernel" on Linux. Tier 7 proves
               the determinism itself and does not depend on either.
 
+  proc.*      IDENTICAL ON BOTH PLATFORMS, which nothing else non-empty in
+              this directory is. spawn is 1 fork and pipe is 2 pipe with 4
+              fcntl -- two ends of two pipes, each marked close-on-exec --
+              and FreeBSD's pipe2 normalises to pipe before the comparison.
+              Worth noticing after M4 and M5, where the same op measured
+              differently on the two kernels for reasons that turned out to be
+              libc's rather than the broker's. Here the broker is doing all of
+              it, so the two agree.
+
 PROVENANCE:
 
   linux/    measured with `sh tools/bscalls.sh --record` on ubuntu-26.04.
-  freebsd/  measured on freebsd-15.1 through the gate. The first version of
-            these files was written from what the platform documents and two
-            of the five were wrong, which is recorded in HANDOFF rather than
-            quietly corrected.
+  freebsd/  measured on freebsd-15.1 through the gate, every one of them.
+            The first version of the M3 files was written from what the
+            platform documents and two of the five were wrong, which is
+            recorded in HANDOFF rather than quietly corrected. Nothing here
+            has been guessed since.
 
 To re-pin a platform after a deliberate change: sh tools/bscalls.sh --record,
 and say in the commit message what moved and why. When a pin cannot be
