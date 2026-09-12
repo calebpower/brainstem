@@ -77,10 +77,18 @@ bs_err sys_random(bs_u8 *buf, size_t n);
  *
  * A DOCUMENTED NO-OP IN v1, with the signature frozen so M8 is an
  * implementation rather than a refactor. seccomp-notify on Linux,
- * cap_enter() on FreeBSD -- and Capsicum is the sharper of the two, because
- * after cap_enter() there is no open() by path at all, which forces the
- * preopen model onto fs.open. That is the "WASI for brainfuck" claim arrived
- * at because the primary platform insisted on it.
+ * cap_enter() on FreeBSD -- and CAPSICUM IS NOW A CONFLICT RATHER THAN A
+ * PLAN. After cap_enter() there is no open() by path at all, so a capability
+ * mode process can only reach what it was handed in advance: the preopen
+ * model, arrived at because the primary platform insisted.
+ *
+ * That model was removed before the ABI was frozen, for reasons ABI.md
+ * section 8.0 sets out at length, and it is not coming back to satisfy a
+ * lockdown. So M8 has to choose on the primary platform -- confine the
+ * filesystem and lose reachability, confine everything else and leave open()
+ * ambient, or ship seccomp-notify on Linux alone and say so. Whoever takes
+ * M8 should read section 8.0 before deciding, because the answer is a
+ * project question and not a platform one.
  *
  * Installed immediately before the main loop, so libc's own startup is out of
  * scope by construction rather than by anyone accounting for it. */
@@ -243,9 +251,10 @@ bs_err sys_listen(bs_osfd fd, bs_u32 backlog);
 bs_err sys_accept(bs_osfd fd, int nowait, bs_osfd *out, bs_addr *peer);
 
 /* Family 3 Unix is DECLARED BY THE ABI AND NOT BUILT, and the reason is a
- * platform divergence rather than a shortage of time: every path in this ABI
- * resolves beneath a preopened directory handle, FreeBSD has bindat(2) and
- * connectat(2) which take exactly that, and Linux has neither. The
+ * platform divergence rather than a shortage of time: a Unix socket address
+ * is a path, this ABI carries paths as a directory handle plus a relative
+ * path, FreeBSD has bindat(2) and connectat(2) which take exactly that, and
+ * Linux has neither. The
  * workarounds are respectively racy and Linux-only. An op that needed a
  * different mechanism on the two platforms is the thing this project will
  * not ship, so family 3 answers NOTSUP on both. */
@@ -322,11 +331,6 @@ bs_err sys_wait(bs_i64 pid, int nowait, bs_u8 *state, bs_u8 *code, bs_u8 *sig);
  * writes as 0644. */
 bs_err sys_open(bs_osfd dir, const char *path, bs_u32 oflags, bs_u32 mode, bs_osfd *out);
 
-/* THE ONE CALL THAT TAKES A BARE PATH, and it exists only for --preopen-*.
- * Those paths come from the command line, which is the broker's operator
- * speaking rather than the program, and they are resolved before the
- * interpreter is started at all. Nothing on the ABI path may call this. */
-bs_err sys_open_host(const char *path, bs_u32 oflags, bs_osfd *out);
 bs_err sys_close(bs_osfd fd);
 
 /* nowait asks for a non-blocking attempt. got/put are set on BS_OK only.
@@ -367,28 +371,18 @@ bs_err sys_dir_close (bs_osdir d);
 /* timeout_ms of 0xFFFFFFFF waits forever; 0 returns immediately. */
 bs_err sys_poll(bs_pollfd *fds, size_t n, bs_u32 timeout_ms, size_t *nready);
 
-/* Duplicate one of the broker's own descriptors, for --preopen-fd. Separate
- * from sys_open because there is no path involved and no directory to resolve
+/* Duplicate one of the broker's own descriptors: stdh.c installs stdin,
+ * stdout and stderr as handles 1, 2 and 3 with these two. Separate from
+ * sys_open because there is no path involved and no directory to resolve
  * beneath, and because a Windows implementation of the two has nothing in
  * common. */
 bs_err sys_dup(bs_osfd fd, bs_osfd *out);
 
-/* Which directions this descriptor was opened for, for --preopen-fd. The
- * operator names a number and the broker works out what it is rather than
- * making them say, because a preopen whose declared rights disagree with the
- * descriptor fails much later with a status pointing somewhere else. */
+/* Which directions this descriptor was opened for. The broker works out what
+ * its own stdio IS rather than assuming, because a handle whose declared
+ * rights disagree with the descriptor behind it fails much later with a
+ * status pointing somewhere else. */
 bs_err sys_fd_mode(bs_osfd fd, bs_u8 *readable, bs_u8 *writable);
-
-/* Does this build ask the KERNEL to keep a path beneath its directory, or
- * only the broker's own string check? 1 when the kernel is doing it.
- *
- * Reported rather than assumed because the answer differs: FreeBSD has
- * O_RESOLVE_BENEATH as a plain open flag, and Linux has the same property
- * only through openat2, which is a raw syscall and arrives with M8. The
- * platform parity tier asserts the OBSERVABLE behaviour is identical either
- * way -- a traversal is refused on both -- and this is how the suite knows
- * which mechanism refused it. */
-bs_u8 sys_beneath_is_kernel(void);
 
 /* Which platform this is, for the hello reply. brainstem's own numbering:
  * 1 FreeBSD, 2 Linux, 3 Windows, 0 other. Not a uname string -- a program

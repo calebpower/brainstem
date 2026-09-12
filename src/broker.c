@@ -175,7 +175,7 @@ int bs_broker_run(const struct bs_opts *o) {
     /* The handle table, then the three standard handles, and both before the
      * child so a program has stdin, stdout and stderr from its very first
      * frame. There is no command line involved: ABI.md section 8 used to
-     * describe a preopen model and does not any more. */
+     * describe a preopen model and describes reachability instead. */
     bs_fdtab_init();
     {
         int bad = 0;

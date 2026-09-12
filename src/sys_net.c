@@ -101,9 +101,9 @@ static void from_sockaddr(const struct sockaddr_storage *ss, bs_addr *a) {
 /* UNIX SOCKETS ARE DECLARED AND NOT BUILT, and the reason is the same one
  * that keeps RENAME_NOREPLACE out of the ABI.
  *
- * Every filesystem path in this ABI resolves beneath a preopened directory
- * handle, so a Unix socket address is a directory handle plus a relative
- * path. FreeBSD has bindat(2) and connectat(2), which take exactly that.
+ * A Unix socket address is a path, and this ABI carries a path as a
+ * directory handle plus a relative path. FreeBSD has bindat(2) and
+ * connectat(2), which take exactly that.
  * Linux has neither, and the workarounds -- fchdir around the call, or
  * /proc/self/fd/N -- are respectively racy and Linux-only.
  *

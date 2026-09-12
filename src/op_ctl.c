@@ -94,28 +94,32 @@ bs_err op_ctl_hello(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) 
      * what lets a trace be replayed from the trace alone. When no seed is in
      * force these are sixteen zeros, which is also the value that says so. */
     bs_put_bytes(rep, det_seed_bytes(), 16);
-    /* The preopen table, and the two counts that introduce it.
+    /* The handle table, and the two counts that introduce it.
      *
-     * Positional, with no name discovery op, because a brainfuck program
-     * cannot usefully compare strings and there is nothing intelligent it
-     * could do with a name it discovered. What it CAN read cheaply is each
-     * preopen's kind and rights, which is what the table carries, at no
-     * round trip cost at all. */
+     * It describes the handles a program has BEFORE its first frame -- its
+     * broker's stdin, stdout and stderr, as 1, 2 and 3 -- because those are
+     * the only ones it could not have learned about from a reply.
+     *
+     * The names are here for a reader rather than for the program: a
+     * brainfuck program cannot usefully compare strings, and there is
+     * nothing intelligent it could do with a name it discovered. What it CAN
+     * read cheaply is each handle's kind and rights, which is what the fixed
+     * part of the table carries, at no round trip cost at all. */
     {
         size_t i, n = bs_fdtab_count();
-        unsigned int npre = 0, tail = 0;
+        unsigned int nlisted = 0, tail = 0;
         for (i = 1; i < n; i++) {
             struct bs_slot *s = bs_fdtab_slot(i);
-            if (!s || !s->preopen) continue;
-            npre++;
+            if (!s || !s->listed) continue;
+            nlisted++;
             tail += 1u + s->namelen;
         }
-        bs_put_u16(rep, npre);
+        bs_put_u16(rep, nlisted);
         bs_put_u16(rep, tail);
 
         for (i = 1; i < n; i++) {
             struct bs_slot *s = bs_fdtab_slot(i);
-            if (!s || !s->preopen) continue;
+            if (!s || !s->listed) continue;
             bs_put_u32(rep, bs_fdtab_handle_of(i));
             bs_put_u8 (rep, s->kind);
             bs_put_u8 (rep, s->namelen);
@@ -124,13 +128,13 @@ bs_err op_ctl_hello(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) 
         }
 
         /* The name tail: one length byte then the bytes, per entry, in the
-         * same order. A program that does not care reads 48 + 12 * npreopen
+         * same order. A program that does not care reads 48 + 12 * nhandle
          * and then counts nametail_len bytes away; one that does walks it
          * with a u8 counter. Both are flat loops, which is the entire design
          * requirement. */
         for (i = 1; i < n; i++) {
             struct bs_slot *s = bs_fdtab_slot(i);
-            if (!s || !s->preopen) continue;
+            if (!s || !s->listed) continue;
             bs_put_u8(rep, s->namelen);
             if (s->namelen) bs_put_bytes(rep, (const unsigned char *)s->name, s->namelen);
         }

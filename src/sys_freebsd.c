@@ -31,6 +31,8 @@ bs_err sys_random(bs_u8 *buf, size_t n) {
 }
 
 /* M8. Frozen signature, documented no-op. Capsicum's cap_enter() goes here,
- * and it is the sharper of the two lockdowns: after it there is no open() by
- * path at all, which forces the preopen model onto fs.open. */
+ * and it is the sharper of the two lockdowns -- sharp enough to conflict with
+ * the design, because after cap_enter() there is no open() by path at all.
+ * See the note on sys_lockdown in sys.h: that is a decision for M8 and it is
+ * a project decision, not a platform one. */
 bs_err sys_lockdown(void) { return BS_OK; }

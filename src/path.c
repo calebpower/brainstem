@@ -18,7 +18,7 @@ bs_err bs_path_check(const unsigned char *p, size_t n) {
      * on the command line. That theory is gone: brainstem exists to make the
      * system VISIBLE to a brainfuck program, and a literal path is the
      * cheapest thing such a program can produce -- it is bytes to emit, and
-     * emitting bytes is the one operation brainfuck is good at. A preopen
+     * emitting bytes is the one operation brainfuck is good at. A handle
      * index, by contrast, has to be agreed out of band between the operator
      * and a program that cannot compare strings.
      *

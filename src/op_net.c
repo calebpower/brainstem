@@ -5,13 +5,19 @@
  * constant length no matter what it is talking to. See ABI.md section 6, and
  * sys_net.c for where the platform numbers go to die.
  *
- * WHAT THIS FILE DOES NOT DO, stated because ABI.md section 8 used to imply
- * otherwise: it does not check a capability before creating a socket. At M5
- * `socket` and `connect` are ambient -- a program that can reach this broker
- * can reach the network. The preopen model bounds the FILESYSTEM and does not
- * bound the network, and section 8.1 now says so in those words. Whether it
- * should is an open design question recorded in HANDOFF rather than settled
- * quietly here.
+ * WHAT THIS FILE DOES NOT DO, and it is settled rather than pending: it does
+ * not check a capability before creating a socket, and there is no flag that
+ * would make it. `socket` and `connect` reach whatever the host routes to,
+ * with the broker's own credentials.
+ *
+ * That was briefly written up as an open design question, on the strength of
+ * a sentence -- "no ambient network access" -- that entered GUIDE.md at M0
+ * when no network op existed. It was vacuously true and phrased as a policy,
+ * and then the world changed under it. The approved plan had already answered
+ * it: the broker "hands a brainfuck program the filesystem, network and
+ * process spawn with its own credentials", and CONVENTIONS' non-goals have
+ * said "brainstem is not a sandbox" since the first commit. ABI.md section 8
+ * says it now in one place instead of implying it in three.
  */
 #include <string.h>
 

@@ -12,7 +12,7 @@
 
 /* Every op here begins the same way: decode a handle, refuse it if the
  * generation is stale or the slot was never issued, and refuse it again if
- * the rights the preopen granted do not cover what is being asked.
+ * the rights the handle carries do not cover what is being asked.
  *
  * RIGHTS ARE CHECKED BEFORE THE SEAM IS TOUCHED, so a refusal costs no
  * syscall and, more importantly, cannot half-happen. */
@@ -102,8 +102,8 @@ bs_err op_io_write(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
 
 /* ABI.md section 7.12. Request: handle{u32}. Reply: empty.
  *
- * Closing a preopen is permitted and permanent -- the program was given it
- * and may give it up. Closing a closed handle is BADF. The slot returns to
+ * Closing one of the three standard handles is permitted and permanent --
+ * the program was given it and may give it up. Closing a closed handle is BADF. The slot returns to
  * the pool immediately and its generation increments, which is required for
  * determinism rather than an implementation detail: it is what makes the
  * next handle predictable AND makes the old one unusable. */

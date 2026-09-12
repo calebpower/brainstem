@@ -1,17 +1,19 @@
 /* op_fs.c — open, seek, stat, readdir, unlink, mkdir, rename.
  *
- * Everything here resolves beneath a directory handle. There is no op in this
- * file that takes a path on its own, which is what makes "nothing is
- * reachable that was not named on the command line" a property of the
- * interface rather than of anyone remembering to check.
+ * Every op here takes a `dir` field, and 0xFFFFFFFF -- "no handle" -- means
+ * resolve the path the way any other process would: against the broker's own
+ * working directory, or absolutely. A real directory handle means resolve
+ * beneath it, which is what readdir needs and what a program walking a tree
+ * wants.
  *
- * WHAT THAT IS AND IS NOT. ABI.md section 8 says it plainly and so does this
- * file: it is a usability and determinism property, not a containment
- * boundary. The broker runs with its operator's credentials. At M4 the
- * confinement is the broker's own string check -- see path_of -- which cannot
- * see a symlink pointing upward. Asking the kernel instead is M8's job,
- * beside sys_lockdown, and sys_beneath_is_kernel() reports which of the two
- * is in force so the suite can check the behaviour either way.
+ * THERE IS NO CONFINEMENT HERE AND THERE IS NOT MEANT TO BE. An earlier
+ * version of this file resolved everything beneath a directory named on the
+ * command line and refused absolute paths and "..". That model was removed
+ * before the ABI was frozen: it cost the project its purpose -- brainstem
+ * exists to make a system VISIBLE to a brainfuck program -- and bought a
+ * property CONVENTIONS' non-goals had disclaimed since the first commit.
+ * ABI.md section 8.0 has the reasoning. src/path.c now refuses exactly two
+ * things, an empty path and one containing a NUL, and says why.
  */
 #include <string.h>
 
@@ -34,7 +36,7 @@ static bs_err want(bs_u32 h, bs_u16 rights, struct bs_slot **out) {
  * that was never issued is BADF. A handle that is a file is NOTDIR -- checked
  * from the table before the op runs, so readdir on a regular file says so
  * rather than something stranger further down on whichever platform noticed
- * first. Only a real directory the preopen did not grant this right on is
+ * first. Only a real directory whose handle does not carry this right is
  * DENIED. Checking rights first would collapse the middle case into the last
  * and tell a program its capability was wrong when its handle was. */
 static bs_err want_dir(bs_u32 h, bs_u16 rights, struct bs_slot **out) {
@@ -129,7 +131,9 @@ bs_err op_fs_open(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
     /* RIGHTS ONLY EVER NARROW. What the open asks for is checked against the
      * directory's rights first, and what the new handle gets is the
      * intersection -- so no sequence of opens can arrive at a handle that can
-     * do more than the preopen it descends from. */
+     * do more than the directory handle it descends from. That is a
+     * legibility property, not a containment one: the same path can always
+     * be opened again from scratch with different flags. */
     if (oflags & BS_O_WRITE)  need = (bs_u16)(need | BS_R_WRITE);
     if (oflags & BS_O_CREATE) need = (bs_u16)(need | BS_R_CREATE);
     e = resolve_dir(dh, need, &dfd, &parent);

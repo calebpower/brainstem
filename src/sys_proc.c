@@ -2,8 +2,8 @@
  * program able to drive another.
  *
  * WHY NOT posix_spawn, WHICH THE PLAN CALLED FOR. It cannot resolve a path
- * beneath a directory handle -- there is no posix_spawnat -- and every path
- * in this ABI is relative to a preopened directory. The obvious repair is
+ * beneath a directory handle -- there is no posix_spawnat -- and spawn takes
+ * a directory handle like every other path op in this ABI. The obvious repair is
  * openat plus fexecve, and fexecve is the trap: FreeBSD implements it in the
  * kernel, and glibc implements it through /proc/self/fd, so on a Linux system
  * without /proc mounted it fails with ENOSYS. An op that worked on the

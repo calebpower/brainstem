@@ -16,8 +16,8 @@
  * Index 0 is never allocated, so handle 0 is never issued, which makes the
  * commonest brainfuck defect loud: a cell you forgot to fill is zero, and
  * zero is not a handle. Generations start at 0 so the FIRST handle is simply
- * its index -- preopen 1 is handle 1 -- and only a reused slot carries a
- * generation the program has to echo back. That keeps the common case cheap
+ * its index -- the broker's stdin is handle 1 -- and only a reused slot
+ * carries a generation the program has to echo back. That keeps the common case cheap
  * to emit and the dangerous case unforgeable.
  *
  * Allocation is LOWEST FREE FIRST and that is required rather than
@@ -42,9 +42,9 @@
  * the broker's own working directory, or absolutely. */
 #define BS_HANDLE_NONE 0xFFFFFFFFu
 
-/* Kinds. THESE ARE THE WIRE VALUES from ABI.md section 8.2, so the preopen
- * table can report them without a second mapping -- a second mapping being
- * how a kind comes to mean two things. */
+/* Kinds. THESE ARE THE WIRE VALUES from ABI.md section 8.2, so the hello
+ * reply's handle table can report them without a second mapping -- a second
+ * mapping being how a kind comes to mean two things. */
 #define BS_HK_NONE     0
 #define BS_HK_FILE     1
 #define BS_HK_DIR      2
@@ -53,15 +53,20 @@
 #define BS_HK_LISTENER 5
 #define BS_HK_SOCKET   6
 #define BS_HK_TTY      7
-/* Not a preopen kind: you cannot preopen a process, so this one never appears
- * in the hello reply's table and is numbered after the ones that do. */
+/* Not a listable kind: a process is not something the broker can hand over
+ * ready-made, so this one never appears in the hello reply's table and is
+ * numbered after the ones that do. */
 #define BS_HK_PROC     8
 
 /* Rights, ABI.md section 8.2. RIGHTS ONLY EVER NARROW: a derived handle gets
- * its parent's rights intersected with what the operation asked for, which is
- * what makes the preopen set an upper bound on everything the program can
- * ever do. Nothing in this file widens a right, and there is no op that
- * grants one. */
+ * its parent's rights intersected with what the operation asked for, so a
+ * file opened read-only stays read-only however it is passed around. Nothing
+ * in this file widens a right, and there is no op that grants one.
+ *
+ * That is a LEGIBILITY property and not a containment one, and since the
+ * preopen model was removed it is nothing else: the program can open the same
+ * path again with different flags whenever it likes. ABI.md section 8 says so
+ * in those words. */
 #define BS_R_READ    0x0001
 #define BS_R_WRITE   0x0002
 #define BS_R_SEEK    0x0004
@@ -79,9 +84,16 @@ struct bs_slot {
     bs_u16   rights;
     bs_osfd  fd;
     bs_osdir dir;          /* non-null only while a readdir walk is open */
-    const char *name;      /* a preopen's name, pointing into argv, or null */
+    const char *name;      /* the name reported in the hello table, or null */
     bs_u8    namelen;
-    int      preopen;      /* named on the command line rather than derived */
+    /* Appears in the hello reply's handle table. True for the three standard
+     * handles and for nothing else, because they are the only handles a
+     * program has before its first frame and so the only ones it could not
+     * have learned about from a reply. This flag was called `preopen` until
+     * the preopen model was removed; the field survived because the TABLE
+     * did, and the name did not survive because it no longer described
+     * anything. */
+    int      listed;
     /* A non-blocking connect in flight. The seam reads and writes it, so the
      * mechanism stays at the seam and the STATE stays on the handle, where
      * the rest of a socket's identity already lives. It is what lets a
@@ -105,7 +117,8 @@ void bs_fdtab_init(void);
  * is the only ownership rule here and the only one worth stating. */
 bs_err bs_fdtab_alloc(bs_u8 kind, bs_u16 rights, bs_osfd fd, bs_u32 *handle);
 
-/* Record a preopen's name for the hello reply. Called only during startup. */
+/* Record a handle's name for the hello reply, and list it there. Called only
+ * during startup, by stdh.c. */
 void bs_fdtab_name(bs_u32 handle, const char *name);
 
 /* Null for a handle that was never issued, or was issued and closed, or
@@ -118,14 +131,15 @@ struct bs_slot *bs_fdtab_get(bs_u32 handle);
 struct bs_slot *bs_fdtab_get_kind(bs_u32 handle, bs_u8 kind);
 
 /* Closes the descriptor and any open directory walk, frees the slot, and
- * increments its generation. Closing a preopen is permitted and permanent.
+ * increments its generation. Closing a standard handle is permitted and
+ * permanent.
  * The generation bump is required for determinism, not an implementation
  * detail: without it a reused slot would hand back a handle the program
  * already holds. */
 bs_err bs_fdtab_free(bs_u32 handle);
 
-/* For the hello reply. Iteration is by slot index so the order is the
- * command line's order, which is the only order the ABI promises. */
+/* For the hello reply. Iteration is by slot index, so the order is the order
+ * the handles were installed in, which is the only order the ABI promises. */
 size_t bs_fdtab_count(void);
 struct bs_slot *bs_fdtab_slot(size_t i);
 bs_u32 bs_fdtab_handle_of(size_t i);

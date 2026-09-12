@@ -19,7 +19,7 @@ void bs_fdtab_init(void) {
         tab[i].dir     = 0;
         tab[i].name    = 0;
         tab[i].namelen = 0;
-        tab[i].preopen = 0;
+        tab[i].listed = 0;
         tab[i].netstate = 0;
         tab[i].pid = 0;
         tab[i].reaped = 0;
@@ -45,7 +45,7 @@ bs_err bs_fdtab_alloc(bs_u8 kind, bs_u16 rights, bs_osfd fd, bs_u32 *handle) {
         tab[i].dir     = 0;
         tab[i].name    = 0;
         tab[i].namelen = 0;
-        tab[i].preopen = 0;
+        tab[i].listed = 0;
         tab[i].netstate = 0;
         tab[i].pid = 0;
         tab[i].reaped = 0;
@@ -63,7 +63,7 @@ void bs_fdtab_name(bs_u32 handle, const char *name) {
     while (name[n] && n < 255) n++;
     s->name    = name;
     s->namelen = (bs_u8)n;
-    s->preopen = 1;
+    s->listed = 1;
 }
 
 struct bs_slot *bs_fdtab_get(bs_u32 handle) {
@@ -115,7 +115,7 @@ bs_err bs_fdtab_free(bs_u32 handle) {
     tab[i].fd      = BS_OSFD_NONE;
     tab[i].name    = 0;
     tab[i].namelen = 0;
-    tab[i].preopen = 0;
+    tab[i].listed = 0;
     tab[i].netstate = 0;
     tab[i].pid = 0;
     tab[i].reaped = 0;

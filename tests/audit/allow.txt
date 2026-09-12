@@ -81,7 +81,6 @@ sys_posix errno
 sys_posix clock_gettime
 sys_posix geteuid
 sys_posix getegid
-sys_posix open
 sys_posix openat
 sys_posix close
 sys_posix read

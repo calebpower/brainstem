@@ -208,16 +208,6 @@ bs_err sys_open(bs_osfd dir, const char *path, bs_u32 oflags, bs_u32 mode, bs_os
     return BS_OK;
 }
 
-bs_err sys_open_host(const char *path, bs_u32 oflags, bs_osfd *out) {
-    int fd;
-    do {
-        fd = open(path, oflags_of(oflags), (mode_t)0);
-    } while (fd < 0 && errno == EINTR);
-    if (fd < 0) return sys_errmap(errno);
-    *out = (bs_osfd)fd;
-    return BS_OK;
-}
-
 bs_err sys_close(bs_osfd fd) {
     /* No EINTR retry, deliberately. On Linux the descriptor is released even
      * when close returns EINTR, so retrying can close a descriptor some other
@@ -546,29 +536,6 @@ bs_err sys_poll(bs_pollfd *fds, size_t n, bs_u32 timeout_ms, size_t *nready) {
     }
     *nready = (size_t)r;
     return BS_OK;
-}
-
-/* ---- what the kernel is and is not doing for us ------------------------- */
-
-bs_u8 sys_beneath_is_kernel(void) {
-    /* ZERO ON BOTH PLATFORMS AT M4, and the signature is frozen so M8 is an
-     * implementation rather than a refactor -- the same arrangement
-     * sys_lockdown has, for the same reason.
-     *
-     * Confinement beneath a preopened directory is currently the broker's own
-     * string check: an absolute path is refused, and so is any component that
-     * is "..". That is genuinely weaker than asking the kernel, because it
-     * cannot see a symlink that points upward, and ABI.md section 8 says so
-     * in those words rather than implying otherwise.
-     *
-     * The kernel can do it on both platforms and neither way is a plain flag
-     * on both: FreeBSD has O_RESOLVE_BENEATH, which is guarded by
-     * __BSD_VISIBLE and so cannot be named in this file at all, and Linux has
-     * the equivalent only through openat2, which is a raw syscall. Both
-     * belong in the platform files beside sys_lockdown, and both land at M8
-     * with it, because that is the milestone where confinement stops being a
-     * usability feature and starts being a claim. */
-    return 0;
 }
 
 bs_err sys_fd_mode(bs_osfd fd, bs_u8 *readable, bs_u8 *writable) {
