@@ -51,10 +51,23 @@ That is the capability the whole project was for: **brainfuck itself becomes
 the harness**, able to chain another program's primitives without a shell
 script in the middle.
 
-Milestone M6, **gated: 173 pass, 0 fail on `freebsd-15.1` and on
-`ubuntu-26.04`.** What remains is not ops — it is tiers. M7 sweeps mutation
-testing across all twenty three, freezes `ABI.md`, and adds `--replay`. M8
-makes `sys_lockdown()` real.
+Milestone M7, and **`ABI.md` is frozen at 1.0** — its version is checked
+against the constants the broker is compiled with and against the two bytes
+the broker actually puts on the wire, so a document that has drifted from the
+binary cannot be committed.
+
+What M7 added was not ops. `--sort-readdir` makes a directory walk
+reproducible, `--replay` answers every frame from a recorded trace without
+touching the system at all, and three tiers that had been declared and absent
+now run: the fixtures' prose is checked against their hex, five metamorphic
+relations say what each knob is allowed to change, and a mutation sweep breaks
+thirty three things in turn and requires a NAMED check to notice each one.
+That sweep found three gaps on its first run — `poll` had no fixture, `PIPE`
+was a status nothing produced, and the broker's `SIGPIPE` handling had nothing
+standing behind it.
+
+M8 makes `sys_lockdown()` real, and has a decision to make first: see the note
+on it in `src/sys.h`.
 
 **It confines nothing, and that is the design.** A brainstem program sees the
 system its broker sees: paths are absolute or relative to the broker's working

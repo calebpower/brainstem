@@ -6,6 +6,21 @@ is actually built and where it has already bitten.
 
 ## State
 
+**Milestone M7 — the tiers that needed all of it, and the ABI frozen at 1.0.**
+M7 added no opcodes. What it added was the ability to believe the rest: the
+fixtures' prose is now checked against their hex, five metamorphic relations
+say what each knob is allowed to change, and a mutation sweep breaks thirty
+three things in turn and requires a NAMED check to notice each one. Plus
+`--sort-readdir`, `--replay`, and a version number that is one number in three
+places -- the document's title, the binary's constants, and the two bytes on
+the wire.
+
+**The sweep found three gaps on its first run**, and each was a claim this
+suite had been making since M4: `poll` had no fixture at all, `PIPE` was a
+status nothing produced, and `signal(SIGPIPE, SIG_IGN)` in main.c had nothing
+standing behind it -- one line whose absence makes the broker die of a signal
+halfway through answering, with no diagnosis. See the tier 11 section below.
+
 **Milestone M6 — brainfuck drives brainfuck. Twenty three of twenty three.**
 A file containing nothing but the eight instructions creates two pipes, starts
 an interpreter on a *second* brainfuck program with those pipes as its stdin
@@ -19,10 +34,13 @@ status.
     > 10 len=6      wait handle 6
     < 00 len=4      exited, code 0
 
-**Gated: 173 pass, 0 fail on `freebsd-15.1` and 173 pass, 0 fail on
-`ubuntu-26.04`.** That covers the removal of the preopen model, which touched
-every fixture in the tree, and the stream read that followed it. M6 was 172 on
-both guests, M5 was 159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
+**M6 was gated at 173 pass, 0 fail on both guests.** M7's own gate number goes
+here when it lands. M5 was 159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
+
+**M7 raises the gate's cost**, and it is worth knowing why before wondering
+about it: tier 11 is about seventy seconds on a quiet Linux container against
+ten for everything else, because it rebuilds and re-runs once per mutation.
+That is the right trade exactly once per gate, and there is nothing to tune.
 
 M3 through M6 were each written in full before either guest ran them, and each
 passed the primary platform first time. **Every FreeBSD failure this project
@@ -165,13 +183,42 @@ as it would in `open`. Writing the check twice would have been writing a
 security-relevant rule twice, which is a rule that gets corrected once. It
 lives in `src/path.c` and both call it.
 
-### What is left is tiers, not ops
+### Tier 11 is the tier that audits the others, and it earns its cost
 
-Every op is built. M7 and M8 add no opcodes. That changes what "done" looks
-like from here: the remaining work is mutation testing swept across all
-twenty three, the metamorphic checks that span ops, freezing `ABI.md`,
-`--replay`, `--sort-readdir`, the capability questions from §8.1, and
-`sys_lockdown()` made real.
+`tools/bsmut.sh` copies the tree, breaks one thing with sed, relinks the
+broker alone, and runs `tests/run.sh` with `BS_ONLY` set to the check that
+mutation is supposed to break -- which must then go red. Thirty three
+mutations: one per built op, generated from the op table, plus nine
+invariants.
+
+**Naming the check is the point.** "Mutate, run everything, require any
+failure" would be easier and would say much less. The table in bsmut.sh is a
+COVERAGE MAP verified by machine -- it states which check stands behind each
+op -- and when a row stops holding, the answer is not to widen the row. It is
+that the op has lost its cover.
+
+**Three of the first four survivors were the TOOL being imprecise**, and
+telling that apart from a real gap is the skill this tier needs. A raw errno
+cannot escape through `sys_errmap`'s `default` when `ECONNREFUSED` has a case
+of its own; `badarity.bf` fails whether or not the dispatcher checks arity,
+because `hello`'s own cursor runs out first. In both the behaviour had two
+guards and the mutation removed one. Those rows now break the guard the named
+check actually depends on. **A mutation that leaves the behaviour intact is
+not a finding**, and a tier that reported it as one would teach people to
+widen rows until the map meant nothing.
+
+**It is the most expensive tier here by a wide margin** -- about seventy
+seconds against ten for everything else. The first working version took 517,
+and three mechanisms bought that down: `build.sh --relink` (one unit, not
+twenty one), `BS_ONLY` (one check, not the suite), and lowered timeouts in the
+copy. That last is the interesting one: fifteen of the thirty three mutations
+SHORTEN A REPLY, which does not produce a wrong answer -- it produces a desync
+that sits there until the op timeout fires. 450 of those 517 seconds were
+spent waiting for defects that had already been decided.
+
+If tier 11 ever needs to be skipped, `BS_ONLY` skips it by construction, and
+that is also how bsmut's own children avoid invoking the tool that invoked
+them.
 
 ### Tier 10a: nine cases, both platforms, nothing guessed
 
@@ -278,7 +325,7 @@ marker in the suite at all.
 | 10 | yes | 13 | platform parity, against traces pinned in tests/trace/ |
 | 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
-| 10c | yes | 10 | the tables and the lane definitions agree |
+| 10c | yes | 11 | the tables, the lanes and the frozen ABI version agree |
 | 11 | yes | 1 | mutation: 33 defects, each caught by a NAMED check |
 | 12 | no | 0 | purity audit, M8 |
 
@@ -520,10 +567,13 @@ for.
 
   The lesson is not "be careful with awk". It is that **a green container run
   is not evidence about FreeBSD**, and the two guest gate earns its keep at
-  precisely the moment someone is tempted to skip it. M3 was predicted to produce the next one and has not yet been run on
-  FreeBSD, so that prediction is still open; the seam was written to expect
+  precisely the moment someone is tempted to skip it.
+
+  M3 was predicted to produce the next one and did, twice over — see "what the
+  gate found that this host could not" above. The seam was written expecting
   it, which is why `bsaudit.sh` parses two `nm` conventions and `bscalls.sh`
-  parses both `kdump` and `strace` in one file.
+  parses both `kdump` and `strace` in one file, and why neither needed
+  touching when the guest disagreed.
 
 - **An untested code path stays broken.** `bstier --fix` passed its `-v`
   options after the awk program, so awk read them as filenames. It had been
@@ -574,25 +624,35 @@ for.
   with SIGTERM, which does not flush. Once that lands, this copy's deltas are
   the two test knobs — `BFI_EOF` and `BFI_FLUSH` — which exist for tier 8 and
   have no reason to go upstream. Re-diff after it merges and update this note.
-- **Every tier past 1 and 10c is declared and absent.** That is expected at M0
-  and it is written into `CONVENTIONS.md` §8 rather than left implicit, but do
-  not let the declaration pass as coverage.
+- **Two tiers are declared and absent, and they are the last two.** Tier 12 is
+  M8's, and tier 11's op sweep covers only the ops that are BUILT -- which is
+  all of them today, and would silently stop being a sweep if an op were ever
+  declared and not built. bsmut's self test checks exactly that correspondence,
+  so it is not a soft spot so much as a thing to know.
+
+  The sentence that used to be here said "every tier past 1 and 10c is declared
+  and absent", which was true at M0 and has been false since M3. It is recorded
+  because it is the shape this project keeps hitting: a sentence that described
+  the state of the tree, in the present tense, becoming a claim about it.
 
 ## What is next
 
-M0 through M6 are done and every op is built. **What remains adds no
-opcodes**, which changes the shape of the work: from here it is tiers,
-freezing, and the capability questions.
+M0 through M7 are done. Every op is built, `ABI.md` is frozen at 1.0, and
+eighteen of the twenty tiers this project declares are running. **Everything
+below adds no opcodes either.**
 
-1. **M7 — the tiers that need all of it.** Tier 11 swept across every op;
-   metamorphic checks spanning ops. ABI.md frozen. `--replay`. Also
-   `--sort-readdir`, moving the PROCESS cases out of `bscalls`' report list
-   and into its pinned list, and `--preopen-listen` /
-   `--preopen-connect` -- which should land with whatever answer the
-   ambient-network question above gets.
-2. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
-   `cap_enter()` on FreeBSD. Expect ABI additions, since `cap_enter()` forces
-   the preopen model onto `open`.
+1. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
+   `cap_enter()` on FreeBSD.
+
+   **THERE IS A DECISION TO MAKE BEFORE ANY CODE.** The note on `sys_lockdown`
+   in `src/sys.h` has it in full, and it is a project decision rather than a
+   platform one. After `cap_enter()` there is no `open()` by path at all, so
+   Capsicum requires exactly the preopen model that ABI.md §8.0 records
+   removing -- and that model is not coming back to satisfy a lockdown. So the
+   primary platform has three answers and none of them is free: confine the
+   filesystem and lose the reachability the whole redesign was for, confine
+   everything else and leave `open` ambient, or ship seccomp-notify on Linux
+   alone and say so in the tier. Read §8.0 before deciding.
 
    **Prerequisite, found at M3 and worth doing first:** draw a few bytes
    through `sys_random` at startup, before the fork, when no seed is in force.
@@ -605,6 +665,27 @@ freezing, and the capability questions.
    needs — warm only when unseeded — is the branch `det.c` already owns. It
    will change `tests/syscalls/freebsd/rand.live.txt` to empty; re-pin with
    `--record` on the guest and say so.
+
+2. **Smaller things, none of them blocking.**
+   - `bf/net/loopback.bf` and `bf/proc/drive.bf` have no pinned trace, because
+     an ephemeral port and a child's timing are not the program's to determine.
+     A mask could bring the port under tier 10 the way the stat mtime is; the
+     mask would need a vacuity check beside it, per the rule below.
+   - Tier 10a has no case for a sorted walk or for a replay. Both were
+     considered and neither is pinned, deliberately: an empty expectation for
+     replay would be a PREDICTION about FreeBSD's libc that this project has
+     been wrong about twice, and the behavioural checks in tier 7 prove more
+     than a syscall count would.
+   - `tools/bfj.c`, the second interpreter the plan wanted for tier 8, was
+     never written. Tier 8 runs the EOF and flush matrix against `bfi` alone,
+     so what it proves is that the protocol survives every convention, not
+     that two interpreters agree.
+
+**The preopen flags are not on this list and will not be.** `--preopen-listen`
+and `--preopen-connect` were recorded here as pending against the
+ambient-network question. That question is answered: there is no capability
+gate on anything, there is no flag that would add one, and ABI.md §8 says so
+in one place instead of implying it in three. Nothing to do.
 
 ## Decisions worth not relitigating
 

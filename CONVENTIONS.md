@@ -303,7 +303,7 @@ Milestones, each ending in a committable unit green on **both** guests.
 | **M4** | **done.** Handles with generations and eleven ops: the filesystem and the bytes that move through it. Fifteen of twenty three. |
 | **M5** | **done.** Five net ops, IPv4 and IPv6. No `netecho` helper was needed: the fixture connects to itself, which removes the second process the plan assumed. Twenty of twenty three. |
 | **M6** | **done.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and a brainfuck program that runs a brainfuck program. |
-| **M7** | the tiers that need all of it: mutation, cross-op metamorphic. ABI frozen. |
+| **M7** | **done.** The tiers that needed all of it. Tier 3b (the header does not lie), tier 5a (metamorphic), tier 11 (mutation, 33 defects each caught by a named check). `--sort-readdir` and `--replay`. ABI.md frozen at 1.0, with the version checked against the binary and against the wire. No new opcodes. |
 | **M8** | the purity audit. |
 
 M2 is the milestone that validates or kills the idea, and it is cheap. If a

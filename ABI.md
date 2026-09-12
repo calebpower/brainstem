@@ -13,6 +13,43 @@ document is the reference you come back to for a field width.
 
 ---
 
+## 0. Status: frozen at 1.0
+
+**This document is frozen as of M7.** Every one of the twenty three ops is
+built, every field width below has been measured on both `freebsd-15.1` and
+`ubuntu-26.04`, and the suite compares this file against the implementation in
+both directions rather than trusting either.
+
+What that means in practice:
+
+| change | allowed | how |
+|---|---|---|
+| adding an opcode | yes | minor bump; unknown opcodes are already recoverable (§3.2) |
+| adding a status code | yes | minor bump, inside an existing range |
+| giving a reserved byte a meaning | yes | minor bump; that is what the reserved bytes are for |
+| changing a field's width, offset or meaning | **no** | major bump, and there is no compatible subset (§3.1) |
+| changing an opcode number or a status number | **no** | major bump |
+| removing anything | **no** | major bump |
+
+**The version is checked, not asserted.** The number in this document's title,
+`BS_VER_MAJOR`/`BS_VER_MINOR` in `src/brainstem.h`, and the two u16 fields the
+broker puts in its own hello reply must all agree, and `tests/run.sh` fails if
+they do not. So a document that has drifted from the binary cannot be
+committed, and neither can a binary that has drifted from the document.
+
+That check is the reason the freeze is worth writing down at all. A frozen
+specification nobody compares to anything is just an old specification.
+
+### 0.1 What changed before the freeze, and why it is recorded
+
+One thing, and it is large: **the preopen model was removed**. §8.0 has the
+reasoning at length. It is recorded rather than quietly replaced because the
+model was specified in this document, was implemented, was tested, and was
+wrong in a way worth being able to read about — it cost the project its
+central goal to buy a property the project's own non-goals disclaimed.
+
+---
+
 ## 1. Transport
 
 ```
@@ -374,9 +411,17 @@ ordinary engineering instinct.
 
 ## 7. The operations
 
-Shared shapes: `handle{u32 LE}`; `dir{u32 LE}` is a directory handle, or `0xFFFFFFFF` for the broker's working directory (§8); a
-relative path resolves beneath; a path is `pathlen{u16 LE} ‖ path` with no NUL
-terminator, no embedded NUL, and no `..` component.
+Shared shapes. `handle{u32 LE}`. `dir{u32 LE}` is a directory handle, or
+`0xFFFFFFFF` for "no handle" — resolve the path the way any other process
+would, against the broker's working directory or absolutely (§8). Against a
+real directory handle a relative path resolves beneath it. A path is
+`pathlen{u16 LE} ‖ path`, with no NUL terminator and no embedded NUL.
+
+**A path may be absolute and may contain `..`.** Both were refused under the
+preopen model and neither is now; the broker refuses exactly two things, an
+empty path and one containing a NUL, and §8.0 says why. A program reaching
+somewhere it should not is a question about the credentials the broker was
+started with, which is the only place it was ever really answered.
 
 | op | name | req | resp |
 |---|---|---|---|
@@ -441,13 +486,17 @@ the ABI at all tells it "no such thing", and collapsing the two sends someone
 looking at their own encoder.
 
 The reason is the same one that keeps `RENAME_NOREPLACE` out of §7.23. A Unix
-socket address in this ABI is a directory handle plus a relative
-path, because there are no absolute paths here. FreeBSD has `bindat(2)` and
-`connectat(2)`, which take exactly that. Linux has neither, and the
-workarounds — `fchdir` around the call, or `/proc/self/fd/N` — are
-respectively racy and Linux-only. An op needing a different mechanism on the
-primary and the secondary platform is the thing this ABI will not ship. The
-record layout stays specified so a later minor version can fill it in. brainstem's own numbers, necessarily. Sockets are created blocking and
+socket address is a path, and this ABI carries a path as a directory handle
+plus a relative one. FreeBSD has `bindat(2)` and `connectat(2)`, which take
+exactly that. Linux has neither, and the workarounds — `fchdir` around the
+call, or `/proc/self/fd/N` — are respectively racy and Linux-only. An op
+needing a different mechanism on the primary and the secondary platform is the
+thing this ABI will not ship. The record layout stays specified so a later
+minor version can fill it in.
+
+**The family and type numbers above are brainstem's own**, necessarily: `AF_INET6`
+is 28 on FreeBSD and 10 on Linux, and CONVENTIONS §3 forbids a number chosen by
+an OS header from appearing in a frame. Sockets are created blocking and
 close-on-exec; blocking is a per-call flag, never socket state, so there is no
 `fcntl` op and no hidden mode.
 
@@ -605,9 +654,12 @@ trade-off here, only an apparent one.
 `namelen` is `u8` because `NAME_MAX` is 255 on both platforms, so a `u16` would
 be a wasted counter.
 
-`.` and `..` are filtered out by the broker. They are unreachable anyway, and a
-program that recursed into them would loop forever — the worst failure for
-something that cannot be interrupted.
+`.` and `..` are filtered out of `readdir` by the broker — which is about
+recursion, not about reachability. A program walking a tree and recursing into
+what it is handed would loop forever, and that is the worst failure available
+to something that cannot be interrupted. Both remain perfectly reachable as
+literal paths through `open` and everything else; they simply never arrive in
+an enumeration the program did not ask for them by name.
 
 **`type` is never 0 from `readdir`.** Both kernels may report an unknown type;
 the broker fills it in with a stat. That is a documented departure from
@@ -867,7 +919,9 @@ field. Adding pipelining would be a major version change.
 
 ## 11. Where one request is not one syscall
 
-The audit tier whitelists these by name rather than discovering them:
+`tools/bscalls.sh` pins the measured multiset per op per platform, so these
+are not exemptions -- they are the rows where the count is not one, and the
+reason it is not:
 
 | op | syscalls | why |
 |---|---|---|
@@ -876,7 +930,7 @@ The audit tier whitelists these by name rather than discovering them:
 | `write` | `write` × k | internal retry loop, §7.11 |
 | `bind` | `bind` + `getsockname` | so an ephemeral port is discoverable |
 | `socket` | + `setsockopt` if `REUSEADDR` | there is no `setsockopt` op |
-| `readdir` | + a stat when the kernel says unknown | type normalisation, §7.20 |
+| `readdir` | + a stat, ALWAYS | `d_type` is not POSIX, §7.20 |
 | `spawn` | fork + dup × k + exec | irreducible |
 | `random_bytes` | × k, or **0** when seeded | short-read loop |
 | blocking ops | + `poll` when `--op-timeout` is set | |

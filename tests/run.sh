@@ -185,6 +185,30 @@ run "every platform guest-setup declares has a branch" sh -c '
 # both against the suite.
 run "HANDOFF's tier table describes the suite" sh tools/bstier.sh
 
+# THE FROZEN ABI VERSION, IN THREE PLACES, WHICH MUST BE ONE NUMBER.
+#
+# ABI.md is frozen at 1.0 as of M7 (its section 0), and a frozen specification
+# nobody compares to anything is just an old specification. The version in the
+# document's title, the constants the broker is compiled with, and the two u16
+# fields the broker actually PUTS ON THE WIRE in its hello reply are checked
+# against each other here.
+#
+# The third of those is the one that matters. The first two are both source
+# files a person edits; only the wire says what a client would really see, and
+# it is read out of a real conversation rather than out of a header.
+run "the ABI version is one number in three places, including the wire" sh -c '
+    doc=$(sed -n "s/^# brainstem ABI — version \([0-9]*\.[0-9]*\)$/\1/p" ABI.md)
+    test -n "$doc" || { echo "ABI.md has no version in its title"; exit 1; }
+    maj=$(sed -n "s/^#define BS_VER_MAJOR \([0-9]*\)$/\1/p" src/brainstem.h)
+    min=$(sed -n "s/^#define BS_VER_MINOR \([0-9]*\)$/\1/p" src/brainstem.h)
+    test "$doc" = "$maj.$min" || { echo "ABI.md says $doc, brainstem.h says $maj.$min"; exit 1; }
+    # the hello record: magic{4} then major{u16 LE} then minor{u16 LE}
+    hex=$(./build/brainstem --trace -- ./build/bfi bf/ctl/hello.bf </dev/null 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < 00 len=[0-9]* 4253544d\(........\).*/\1/p" | head -1)
+    want=$(printf "%02x00%02x00" "$maj" "$min")
+    test "$hex" = "$want" || { echo "the wire says $hex, the headers say $want"; exit 1; }
+    exit 0'
+
 # The user documentation makes two claims a reader will act on, and both are
 # checkable, so both are checked. A guide that documents a flag the binary does
 # not have costs someone an afternoon deciding their quoting is wrong, and a

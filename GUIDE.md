@@ -6,10 +6,11 @@ write a program against it, and work out why it is not doing what you meant.
 [ABI.md](ABI.md) is the reference you come back to for a field width. This
 document is the one you read once, in order.
 
-> **Nothing works yet.** brainstem is at milestone M0 — the test lanes and the
-> documents exist, the broker does not. Everything below describes the system
-> being built, and the examples are written against a specification rather than
-> against a running program. When M2 lands, the first three of them will run.
+> **All of this runs.** Every one of the twenty three operations is built and
+> `ABI.md` is frozen at 1.0. Every worked example below is a fixture the suite
+> executes on `freebsd-15.1` and on `ubuntu-26.04`, and the suite checks that
+> the text here is still the text of the fixture — so an example that had
+> drifted would fail a build rather than waste your afternoon.
 
 ---
 
