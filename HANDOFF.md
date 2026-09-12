@@ -255,21 +255,41 @@ for.
   **Write the diagnosis into the tool, not the postmortem.** Anything that runs
   only on the guest should assume its author will never see the machine.
 
-- **A syscall tier cannot see a syscall that libc does not make.** The plan for
-  tier 10a said "one fixture per op under `ktrace` or `strace`, diff the
-  observed multiset". Run it on `clock_now` and the multiset is EMPTY on Linux:
-  glibc serves `clock_gettime` from the vDSO, so no syscall is issued and no
-  tracer can see one. FreeBSD does the same thing through its timekeeping page.
+- **A syscall tier cannot see a syscall that libc does not make — and I
+  guessed wrong about which ones those were.** The plan for tier 10a said "one
+  fixture per op under `ktrace` or `strace`, diff the observed multiset". Run
+  it on `clock_now` and the multiset is EMPTY on Linux: glibc serves
+  `clock_gettime` from the vDSO, so no syscall is issued and no tracer can see
+  one.
 
-  This is not a defect and it is not fixable — it is what the platform does —
-  but it quietly removes a claim the tier looked like it was making. So the
-  tier makes the claim it can actually support: what is pinned is the op
-  specific part of the multiset, and for most fixtures that is empty. The
-  measurement that survives is the one that mattered most anyway,
-  `rand.seeded` against `rand.live`: nothing at all versus one `getrandom`,
-  which is the seeded generator proving it never consults the kernel. If you
-  add an op and its pinned file comes back empty, check whether the call is
-  real before concluding the op does nothing.
+  I then wrote in this file that FreeBSD does the same through its timekeeping
+  page, and pinned an empty expectation to match. **It does not.** The gate
+  measured two `clock_gettime` calls, one per clock read. The general lesson
+  was right and the specific claim was invented, and it sat in a document
+  whose whole job is to be the part you can trust. Pins that cannot be measured
+  from the host doing the work must say so in the file itself — the first
+  version of `tests/syscalls/README` did, which is the only reason this reads
+  as a corrected guess rather than a contradicted measurement.
+
+  None of this is a defect and none of it is fixable — it is what the platforms
+  do — but it quietly removes a claim the tier looked like it was making. So
+  the tier makes the claim it can support: what is pinned is the op specific
+  part of the multiset, per platform, and for several fixtures that is empty.
+  If you add an op and its pinned file comes back empty, check whether the call
+  is real before concluding the op does nothing.
+
+  The same run turned up the other half. `rand.live` on FreeBSD is three calls,
+  not one: `arc4random_buf` allocates its per-thread state on first use, with
+  an `mmap` and a `minherit` marking the page `INHERIT_ZERO` so a fork cannot
+  inherit a generator. A one-time lazy initialisation, landing inside the
+  measured window only because the window opens at the fork and the first
+  `random_bytes` comes after it. It is pinned as observed; moving it out is an
+  M8 prerequisite and is listed there.
+
+  And note what FreeBSD's answer costs: once that generator is warm it is pure
+  userspace, so `rand.live` and `rand.seeded` measure the same thing there. The
+  pair that demonstrates "a seed consults no kernel" only demonstrates it on
+  Linux. Tier 7 proves the determinism itself and leans on neither.
 
 - **A normalisation nearly made the parity tier vacuous.** Tier 10 compares a
   trace against a file in `tests/trace/`, and exactly one byte — the platform
@@ -384,6 +404,18 @@ M0 through M3 are done. What remains:
 5. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
    `cap_enter()` on FreeBSD. Expect ABI additions, since `cap_enter()` forces
    the preopen model onto `open`.
+
+   **Prerequisite, found at M3 and worth doing first:** draw a few bytes
+   through `sys_random` at startup, before the fork, when no seed is in force.
+   FreeBSD's `arc4random_buf` allocates its generator state lazily on first
+   use — an `mmap` and a `minherit` — and a filter installed before the loop
+   would otherwise have to permit both, forever, so that one lazy
+   initialisation can happen inside the ABI path. Warming it moves those calls
+   outside the window the filter covers and makes every `random_bytes` alike.
+   The policy belongs in `det.c` rather than the seam, because the branch it
+   needs — warm only when unseeded — is the branch `det.c` already owns. It
+   will change `tests/syscalls/freebsd/rand.live.txt` to empty; re-pin with
+   `--record` on the guest and say so.
 
 ## Decisions worth not relitigating
 

@@ -7,24 +7,49 @@ asked the kernel for nothing at all.
 
 The two directories are not expected to agree, and that is the point of having
 two. Which calls are visible to a tracer is a platform property rather than a
-program property: Linux serves clock_gettime from the vDSO and FreeBSD from
-its timekeeping page, so time.live is empty on both for a reason neither
-shares with the other, while getrandom is a real syscall on Linux and
-arc4random_buf is a userspace generator on FreeBSD that reseeds from the
-kernel at most once.
+program property, and both halves of that turned out to be more interesting
+than expected:
 
-PROVENANCE, because it differs and pretending otherwise would be the kind of
-thing this project writes tiers to prevent:
+  time.live   Linux measures NOTHING. glibc serves clock_gettime from the
+              vDSO, so the syscall is never made and no tracer can see one.
+              FreeBSD measures TWO, one per clock read. The guess that FreeBSD
+              would also serve this from its timekeeping page was wrong, and
+              was corrected by the gate rather than by reasoning.
 
-  linux/    measured, with `sh tools/bscalls.sh --record`, on ubuntu-26.04.
-  freebsd/  NOT YET MEASURED as of M3. Written from what the platform
-            documents. The four empty files are certain -- none of those
-            paths reaches the kernel on any platform, and rand.seeded's
-            emptiness is a property of det.c rather than of FreeBSD.
-            rand.live is the inference: arc4random_buf seeds its per-thread
-            ChaCha state from the kernel on first use, which should be one
-            getrandom. If the gate says otherwise, the gate is right; the
-            failure prints the observed multiset and the fix is this line.
+  rand.live   Linux measures one getrandom. FreeBSD measures three calls, and
+              the two extra ones are the interesting part: arc4random_buf
+              allocates its per-thread generator state on FIRST USE -- an mmap,
+              then a minherit to mark the page INHERIT_ZERO so a fork cannot
+              inherit a generator's state. That is a one-time lazy
+              initialisation that happens to land inside the measured window,
+              because the window opens at the fork and the first random_bytes
+              comes after it.
+
+              IT IS PINNED AS OBSERVED RATHER THAN ENGINEERED AWAY, for now.
+              Drawing a few bytes at startup would move all three calls out of
+              the window and make every random_bytes look alike, which is the
+              right thing to do -- but it is an M8 prerequisite rather than an
+              M3 tidy-up, because the reason it matters is that a lockdown
+              filter installed before the loop would otherwise have to permit
+              mmap and minherit forever for the sake of one lazy init. See
+              HANDOFF, "What is next".
+
+              Note what this costs on the primary platform: after that first
+              call FreeBSD's generator is pure userspace, so rand.live and
+              rand.seeded would measure the same once warmed. The pair only
+              demonstrates "a seed consults no kernel" on Linux. Tier 7 proves
+              the determinism itself and does not depend on either.
+
+PROVENANCE:
+
+  linux/    measured with `sh tools/bscalls.sh --record` on ubuntu-26.04.
+  freebsd/  measured on freebsd-15.1 through the gate. The first version of
+            these files was written from what the platform documents and two
+            of the five were wrong, which is recorded in HANDOFF rather than
+            quietly corrected.
 
 To re-pin a platform after a deliberate change: sh tools/bscalls.sh --record,
-and say in the commit message what moved and why.
+and say in the commit message what moved and why. When a pin cannot be
+measured from the host doing the work, say so IN THE FILE, the way the first
+version of this one did -- the gate then corrects a labelled guess instead of
+appearing to contradict a measurement.
