@@ -1,0 +1,48 @@
+# proc/refused.poke -- the ways spawn says no, and the one way it says yes to
+# something that then fails.
+#
+# The interesting case is the last kind: spawning a program that does not
+# exist SUCCEEDS. fork worked, the child ran, execve failed, and the child
+# exited 127. That is POSIX, it is what every shell reports, and a broker that
+# tried to hide it would have to wait for the child before answering -- which
+# would make every spawn synchronous to make one error tidier.
+#
+# Frames transcribed by hand from ABI.md sections 4 and 7.14 to 7.16.
+#
+#   hello  op 01, len 10, with one preopen: 68 bytes back
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 68
+#   pipe with an undefined flag bit -- INVAL 06
+EMIT 0e 02 00 01 00
+READ 3
+#   spawn with nargv 0 -- INVAL 06. A child with no argv[0] is not a thing
+#   this ABI can express.
+EMIT 0f 0f 00 01 00 00 00 00 00 00 00 00 00 03 00 62 66 69
+READ 3
+#   spawn with the path ".." -- DENIED 04, from the same checker the
+#   filesystem ops use. spawn fchdirs to the directory handle and execs a
+#   relative path, so ".." escapes exactly as it would in open.
+EMIT 0f 12 00 01 00 00 00 00 00 00 01 00 00 02 00 2e 2e 02 00 2e 2e
+READ 3
+#   spawn with an absolute path -- INVAL 06. There are none in this ABI.
+EMIT 0f 1c 00 01 00 00 00 00 00 00 01 00 00
+EMIT 07 00 2f 62 69 6e 2f 73 68
+EMIT 07 00 2f 62 69 6e 2f 73 68
+READ 3
+#   spawn "nope", which does not exist.  This SUCCEEDS: handle 2.
+EMIT 0f 16 00 01 00 00 00 00 00 00 01 00 00
+EMIT 04 00 6e 6f 70 65
+EMIT 04 00 6e 6f 70 65
+READ 7
+#   wait for it -- state 1 exited, code 127, because the child could not exec
+EMIT 10 06 00 02 00 00 00 00 00
+READ 7
+#   wait on the preopened directory, which is not a process -- BADF 03, from
+#   the handle's kind
+EMIT 10 06 00 01 00 00 00 00 00
+READ 3
+EMIT 0c 04 00 02 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

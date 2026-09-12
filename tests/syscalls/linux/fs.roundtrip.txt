@@ -1,0 +1,9 @@
+2 brk
+3 fcntl
+5 fstat
+2 getdents64
+1 lseek
+1 mkdirat
+2 open
+1 renameat
+1 unlinkat

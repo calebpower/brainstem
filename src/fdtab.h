@@ -47,6 +47,9 @@
 #define BS_HK_LISTENER 5
 #define BS_HK_SOCKET   6
 #define BS_HK_TTY      7
+/* Not a preopen kind: you cannot preopen a process, so this one never appears
+ * in the hello reply's table and is numbered after the ones that do. */
+#define BS_HK_PROC     8
 
 /* Rights, ABI.md section 8.2. RIGHTS ONLY EVER NARROW: a derived handle gets
  * its parent's rights intersected with what the operation asked for, which is
@@ -79,6 +82,14 @@ struct bs_slot {
      * re-issued connect mean 'how did that go' with no getsockopt op in the
      * ABI at all. */
     int      netstate;
+
+    /* A spawned child. The pid never reaches the wire -- pids differ between
+     * runs and platforms and the wire must not -- and the reaped status is
+     * cached here because the kernel will only report it once, while ABI.md
+     * requires wait to be idempotent after reaping. */
+    bs_i64   pid;
+    int      reaped;
+    bs_u8    pstate, pcode, psig;
 };
 
 void bs_fdtab_init(void);

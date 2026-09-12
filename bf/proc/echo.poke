@@ -1,0 +1,12 @@
+# echo.poke -- the INNER program. Not a brainstem client at all.
+#
+# This is the one fixture in the tree that speaks no protocol: it reads bytes
+# and writes them back until end of input, which is the classic brainfuck cat.
+# It exists to be run BY another brainfuck program, through spawn, with its
+# stdin and stdout wired to pipes the outer program created.
+#
+# It needs BFI_EOF=zero to terminate, and the outer program passes exactly
+# that and nothing else -- see drive.poke. Under the interpreter's default,
+# ',' at end of input leaves the cell holding the last byte read, and this
+# loop would echo it forever.
+,[.,]

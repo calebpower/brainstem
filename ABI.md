@@ -709,6 +709,12 @@ rather than before it.
 index 1. `--preopen-listen` and `--preopen-connect` are specified above and
 are M7.
 
+**A directory preopen carries `EXEC`**, so `spawn` can run a program out of
+it. Granting it separately needs a syntax for splitting a directory's rights,
+which should arrive with the capability work rather than before it — the same
+reasoning as §8.1. Today the right narrows only through derived handles: a
+file opened out of that directory does not carry it.
+
 Positional, with no name-discovery op. WASI has one because a WASI program can
 usefully compare strings; a brainfuck program cannot, and there is nothing
 intelligent it could do with a name it discovered. What it *can* discover

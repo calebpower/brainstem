@@ -67,7 +67,7 @@ $CC $CFLAGS -o build/bsbf    tools/bsbf.c
 # compiler actually emitted, which is the difference between a claim and a
 # measurement. Keeping the objects is the whole reason this is not one cc
 # line with eleven files on it.
-BS_UNITS="main broker child ops op_ctl op_time op_rand op_io op_fs op_net frame err sys_posix det fdtab preopen sys_net"
+BS_UNITS="main broker child ops op_ctl op_time op_rand op_io op_fs op_net op_proc path frame err sys_posix det fdtab preopen sys_net sys_proc"
 
 # The platform half of the seam is chosen here, by uname, and its object is
 # the ONLY one compiled with a namespace widening macro. Everything above the

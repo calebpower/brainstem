@@ -6,80 +6,85 @@ is actually built and where it has already bitten.
 
 ## State
 
-**Milestone M5 — the program has a network.** A file containing nothing but
-the eight brainfuck instructions binds an ephemeral TCP port, listens,
-connects to itself, accepts the connection, and sends bytes through it.
+**Milestone M6 — brainfuck drives brainfuck. Twenty three of twenty three.**
+A file containing nothing but the eight instructions creates two pipes, starts
+an interpreter on a *second* brainfuck program with those pipes as its stdin
+and stdout, sends it two bytes, reads its answer, and collects its exit
+status.
 
-    > 07 len=38     bind handle 1, 127.0.0.1 port 0
-    < 00 len=32     OK, and the port it actually got
-    > 06 len=38     connect handle 2 to that same port
-    < 00 len=36     accept: handle 3 and the peer address
+    > 0f len=53     spawn "bfi" "echo.bf", child fd 0 <- handle 2, fd 1 <- handle 5
+    < 00 len=4      OK, process handle 6
+    > 0a len=8      read handle 4
+    < 00 len=2      6869
+    > 10 len=6      wait handle 6
+    < 00 len=4      exited, code 0
 
-**Gated on Linux: 159 pass, 0 fail in the container lane. THE FREEBSD HALF OF
-M5 HAS NOT RUN.** M4 was 148 on both guests, M3 was 132, M2 was 94, M0 was 22.
+**Gated on Linux: 172 pass, 0 fail in the container lane. THE FREEBSD HALF OF
+M6 HAS NOT RUN.** M5 was 159 on both guests, M4 was 148, M3 was 132, M2 was
+94, M0 was 22.
 
-Twenty of the twenty three ops are built. `pipe`, `spawn` and `wait` remain
-and are M6.
+### The three decisions in M6 worth not relitigating
 
-### THE OPEN QUESTION M5 FOUND, which is not mine to close
+**fork + fchdir + execve, not posix_spawn, and not fexecve.** The plan called
+for `posix_spawn` with explicit file actions. It cannot resolve a path beneath
+a directory handle -- there is no `posix_spawnat` -- and every path in this
+ABI is relative to a preopen. The obvious repair is `openat` plus `fexecve`,
+and **`fexecve` is the trap**: FreeBSD implements it in the kernel, glibc
+implements it through `/proc/self/fd`, so on a Linux system without `/proc`
+mounted it fails with ENOSYS. An op that worked on the primary platform and
+depended on a filesystem being mounted on the secondary one is exactly the
+divergence this project refuses.
 
-ABI.md section 8 said "no ambient network access". **That was false the moment
-`socket` was built, and the sentence is corrected rather than left standing.**
-`socket` takes no capability, `connect` reaches anywhere the host can route,
-and the preopen set bounds the filesystem and nothing else.
+So the child forks, `fchdir`s to the directory handle, installs the map, and
+execs a relative path. `fchdir` is safe there and nowhere else: between fork
+and exec the child is single threaded, so nothing can observe the working
+directory changing. The inheritance story is not weaker than `posix_spawn`'s,
+it is stronger -- everything this broker opens is close-on-exec, so the
+descriptor map is not merely the intended set, it is the whole set.
 
-Making it true needs a capability gate on socket creation. The milestone plan
-says there is **no `--allow` capability surface in v1**, with capability work
-arriving at M8 beside `sys_lockdown()`. So adding a gate at M5 would
-contradict a decision that was made deliberately, and leaving the sentence
-contradicted the code. The sentence lost, and the decision is flagged here
-instead of being made quietly in either direction.
+**The descriptor map is applied in two passes.** A map saying "child 0 gets my
+fd 5, child 5 gets my fd 0" cannot be applied in either order directly: the
+first `dup2` destroys the second's source. Every source is moved above every
+target first, then `dup2`'d down. One pass works until the day the numbers
+overlap, and the symptom would be a child reading from the wrong end of a pipe.
 
-If the answer is "gate it", the change is one line in `op_net_socket` plus a
-flag, and `--preopen-listen` and `--preopen-connect` should land with it --
-which is why those two moved from M5 to M7 rather than being built now.
-Capability plumbing whose value depends on an unanswered question should
-arrive with the answer.
+**wait is idempotent after reaping.** The kernel reports a status once, so it
+is cached on the handle and repeated until the handle is closed. Without that,
+a program asking twice would get NOCHILD the second time and have no way to
+tell that from a handle it invented. Closing a process handle does **not** kill
+the child: the program asked to stop tracking it, not to end it.
 
-### What M5 added
+### The path rule now has one home
 
-- **`src/sys_net.c`**, split out of `sys_posix.c` because this is where the
-  two kernels disagree most and the file is worth reading alone. `AF_INET6` is
-  28 on FreeBSD and 10 on Linux; FreeBSD's `sockaddr_in` has a leading
-  `sin_len` byte and Linux's does not. Every one of those numbers dies in that
-  file and nothing above it can name one.
-- **Non-blocking connect with no `getsockopt` op.** Connect with NOWAIT, get
-  AGAIN, poll for writable, and re-issue the identical frame; the broker reads
-  `SO_ERROR` and reports. The in-flight state lives on the handle
-  (`bs_slot.netstate`) and the mechanism lives at the seam.
-- **No `netecho` helper, and it is not missing.** The plan called for one so
-  the tier would not depend on `nc`, whose flags differ between the guests. A
-  program that talks to *itself* removes the helper too: no second binary, no
-  port agreed out of band, nothing left running if the suite is interrupted.
-  That is strictly better than the design it replaces, which is why it is
-  recorded here rather than listed as a gap.
+`op_fs` and `op_proc` both resolve a path beneath a directory handle, and
+`spawn` `fchdir`s and execs a relative path, so `".."` escapes there exactly
+as it would in `open`. Writing the check twice would have been writing a
+security-relevant rule twice, which is a rule that gets corrected once. It
+lives in `src/path.c` and both call it.
 
-### The M5 fixture is the most interesting one in the tree
+### What is left is tiers, not ops
 
-`bf/net/loopback.poke` carries a VALUE rather than a literal. `bind` answers
-with the port it actually bound -- there is no `getsockname` op, and that
-reply is the entire reason there does not need to be one -- and the program
-reads those two bytes and emits them back inside the `connect` frame.
+Every op is built. M7 and M8 add no opcodes. That changes what "done" looks
+like from here: the remaining work is mutation testing swept across all
+twenty three, the metamorphic checks that span ops, freezing `ABI.md`,
+`--replay`, `--sort-readdir`, the capability questions from §8.1, and
+`sys_lockdown()` made real.
 
-That is raw brainfuck, `>,>,<<` and `>.>.<<`, because `bfgen` only ever writes
-literals and adding a "save this byte" directive would have made it choose a
-tape layout, which is the line between an expander and a compiler that
-CONVENTIONS section 6 refuses to cross. It works because `READ` emits only
-commas and never moves the pointer, so cell 0 is the working cell and cells 1
-and 2 are free. Anything else that needs to carry a value between frames
-should be written the same way.
+### Still unpinned: the proc syscall surface
 
-There is no pinned trace for the net fixtures, deliberately. The ephemeral
-port differs every run, so a byte-identical trace is impossible without
-masking it -- and the bind reply is 32 bytes, exactly like a stat reply, so a
-mask keyed on the length would corrupt the other one. The net checks assert
-structure instead, including the one that matters: the port in the connect
-frame must equal the port bind returned.
+`tests/syscalls/*/proc.*` do not exist yet, for the same reason the filesystem
+ones did not at M4: writing FreeBSD expectations from a host that cannot reach
+FreeBSD is guessing, and guessing has cost two round trips already. The suite
+measures and prints them -- `sh tools/bscalls.sh --report` -- and Linux
+currently reports `proc.drive` as 4 fcntl, 1 fork, 2 pipe, and `proc.refused`
+as 1 fork. Paste the FreeBSD half in and move both cases into `cases()`.
+
+`fork`, `pipe`, `dup2` and `execve` came off the baseline at M6, for the same
+reason `fstat` and `lseek` came off it at M4: the broker's own uses all happen
+before the window opens, so anything the tracer sees afterwards belongs to
+`spawn` and `pipe`. `wait4` stays and is the one genuinely ambiguous entry --
+the broker reaps its own interpreter inside the window, so a count there would
+mix that with `proc.wait`'s.
 
 ### What the gate found that this host could not
 
@@ -158,8 +163,8 @@ marker in the suite at all.
 | 3a | yes | 2 | fixture legibility, and the expander knows no ABI |
 | 3b | no | 0 | the header does not lie — needs bsframe --decode wiring |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | yes | 16 | per-op round trip |
-| 6 | yes | 15 | error paths |
+| 5 | yes | 21 | per-op round trip |
+| 6 | yes | 17 | error paths |
 | 7 | yes | 12 | determinism: seed, frozen and virtual clock, both polarities |
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
@@ -415,21 +420,17 @@ for.
 
 ## What is next
 
-M0 through M3 are done. What remains:
+M0 through M6 are done and every op is built. **What remains adds no
+opcodes**, which changes the shape of the work: from here it is tiers,
+freezing, and the capability questions.
 
-1. **M6 — proc.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and
-   last because it is the hairiest: fd leaks, zombies, and `SIGCHLD` racing the
-   broker's own reaping of the interpreter. **This is the payoff** — a
-   brainfuck program spawning an interpreter on a second brainfuck program is
-   what makes brainfuck itself the harness that can chain bfsodium's
-   primitives.
-2. **M7 — the tiers that need all of it.** Tier 11 swept across every op;
+1. **M7 — the tiers that need all of it.** Tier 11 swept across every op;
    metamorphic checks spanning ops. ABI.md frozen. `--replay`. Also
-   `--sort-readdir`, moving the filesystem cases out of `bscalls`' report
-   list and into its pinned list, and `--preopen-listen` /
+   `--sort-readdir`, moving the PROCESS cases out of `bscalls`' report list
+   and into its pinned list, and `--preopen-listen` /
    `--preopen-connect` -- which should land with whatever answer the
    ambient-network question above gets.
-3. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
+2. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
    `cap_enter()` on FreeBSD. Expect ABI additions, since `cap_enter()` forces
    the preopen model onto `open`.
 

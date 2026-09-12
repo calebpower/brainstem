@@ -56,8 +56,19 @@ repo=$(CDPATH= cd -- "$here/.." && pwd)
 # about. Leaving them would have hidden the two syscalls behind fs.stat and
 # fs.seek -- a baseline that swallows an op's own call makes the tier pass by
 # not looking, which is the failure this file already warns about twice.
-BASELINE="read write poll close fork wait4 sigprocmask sigaction sigreturn
-exit pipe dup2 execve kill ioctl"
+# fork, pipe, dup2 and execve came off this list at M6, and for the same
+# reason fstat and lseek came off it at M4: the broker's own uses of them all
+# happen BEFORE the window opens -- the window starts at the fork that starts
+# the interpreter -- so anything the tracer sees afterwards belongs to
+# proc.spawn and proc.pipe. A baseline that swallows an op's own call makes
+# the tier pass by not looking.
+#
+# wait4 stays, and is the one genuinely ambiguous entry: the broker reaps its
+# own interpreter inside the window, so a count here would mix that with
+# proc.wait's. Named rather than quietly dropped, because the ambiguity is
+# worth knowing about before someone adds a case that depends on it.
+BASELINE="read write poll close wait4 sigprocmask sigaction sigreturn
+exit kill ioctl"
 
 # Spellings that belong to the tracer rather than to the program.
 normalise_calls() {
@@ -123,6 +134,8 @@ time.live||bf/time/clock.bf
 time.frozen|--clock frozen=1700000000|bf/time/clock.bf
 rand.live||bf/rand/bytes.bf
 rand.seeded|--seed 000102030405060708090a0b0c0d0e0f|bf/rand/bytes.bf
+fs.roundtrip|--preopen-dir work=%W|bf/fs/roundtrip.bf
+fs.refused|--preopen-dir work=%W|bf/fs/refused.bf
 EOT
 }
 
@@ -147,8 +160,8 @@ EOT
 # %W in the options is replaced with a directory created fresh for that case.
 observe_cases() {
     cat <<'EOT'
-fs.roundtrip|--preopen-dir work=%W|bf/fs/roundtrip.bf
-fs.refused|--preopen-dir work=%W|bf/fs/refused.bf
+proc.drive|--op-timeout 5000 --preopen-dir work=%P|bf/proc/drive.bf
+proc.refused|--op-timeout 5000 --preopen-dir work=%P|bf/proc/refused.bf
 EOT
 }
 
@@ -163,10 +176,21 @@ platform_dir() {
 measure() {  # measure OPTS FIXTURE OUTFILE
     opts=$1; fixture=$2; out=$3
     t=${TMPDIR:-/tmp}/bscalls.$$
+    # %W is a fresh empty directory; %P is a fresh one with the interpreter
+    # and the inner program in it, because a brainfuck program cannot copy a
+    # binary. Two placeholders rather than one: fs.roundtrip does a readdir
+    # and expects exactly one entry, so preparing every directory the same way
+    # would break it.
     case "$opts" in
         *%W*)
             rm -rf "$t.work"; mkdir -p "$t.work"
             opts=$(printf '%s' "$opts" | sed "s|%W|$t.work|")
+            ;;
+        *%P*)
+            rm -rf "$t.work"; mkdir -p "$t.work"
+            cp build/bfi "$t.work/bfi"
+            cp bf/proc/echo.bf "$t.work/echo.bf"
+            opts=$(printf '%s' "$opts" | sed "s|%P|$t.work|")
             ;;
     esac
     case "$(uname -s)" in
@@ -282,6 +306,10 @@ fi
 if [ "${1:-}" = "--report" ]; then
     cd "$repo"
     [ -x build/brainstem ] || { echo "bscalls: no build/brainstem" >&2; exit 2; }
+    if [ -z "$(observe_cases)" ]; then
+        echo "bscalls: nothing unpinned on $(platform_dir); every case is compared."
+        exit 0
+    fi
     echo "bscalls: NOT YET PINNED, measured on $(platform_dir). Paste these into"
     echo "bscalls: tests/syscalls/<platform>/ and move the case into cases()."
     observe_cases | while IFS='|' read -r name opts fixture; do

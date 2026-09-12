@@ -56,7 +56,7 @@ NM=${NM:-nm}
 IGNORABLE="__stack_chk_fail __stack_chk_guard __stack_smash_handler
 _GLOBAL_OFFSET_TABLE_ __gmon_start__ _DYNAMIC __dso_handle
 __cxa_finalize __cxa_atexit
-memcpy memmove memset memcmp
+memcpy memmove memset memcmp memchr
 strlen strnlen strcmp strncmp strchr strrchr"
 
 # Normalise a symbol to the name the SOURCE used.

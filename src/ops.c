@@ -32,6 +32,9 @@ bs_err op_net_connect(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_net_bind   (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_net_listen (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_net_accept (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_proc_pipe (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_proc_spawn(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_proc_wait (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 
 static const struct bs_op bs_ops[] = {
 #define OP(c, n, f, q, p) { (c), #n, f, (q), (p) },

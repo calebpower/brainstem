@@ -28,48 +28,53 @@ is also what makes the broker indifferent to which language is on the far end.
 
 ## Status
 
-**It works, for twenty of twenty three operations.** A file containing nothing
-but the eight brainfuck instructions binds an ephemeral TCP port, listens,
-connects to itself, accepts, and sends bytes through the socket:
+**All twenty three operations are built.** A file containing nothing but the
+eight brainfuck instructions creates two pipes, starts an interpreter on a
+*second* brainfuck program with those pipes as its stdin and stdout, sends it
+two bytes, reads its answer, and collects its exit status:
 
 ```
-> 07 len=38     bind handle 1, 127.0.0.1 port 0
-< 00 len=32     OK, and the port it actually got
-> 06 len=38     connect handle 2 to that same port
-< 00 len=0      OK
-> 09 len=6      accept on handle 1
-< 00 len=36     OK, handle 3 and the peer address
-> 0b len=8      write handle 2, "hi"
-> 0a len=8      read handle 3
+> 0e len=2      pipe
+< 00 len=8      OK, handles 2 and 3
+> 0e len=2      pipe
+< 00 len=8      OK, handles 4 and 5
+> 0f len=53     spawn "bfi" "echo.bf", child fd 0 <- handle 2, fd 1 <- handle 5
+< 00 len=4      OK, process handle 6
+> 0b len=8      write handle 3, "hi"
+> 0a len=8      read handle 4
 < 00 len=2      6869
+> 10 len=6      wait handle 6
+< 00 len=4      exited, code 0
 ```
 
-It needs no second process and no agreed port number, because `bind` replies
-with the address actually bound — and the program carries those two bytes from
-the reply into the connect frame in raw brainfuck.
+That is the capability the whole project was for: **brainfuck itself becomes
+the harness**, able to chain another program's primitives without a shell
+script in the middle.
 
-Milestone M5. Three ops remain: `pipe`, `spawn` and `wait`, which are M6 and
-are the payoff — they are how one brainfuck program drives another.
+Milestone M6. What remains is not ops — it is tiers. M7 sweeps mutation
+testing across all twenty three, freezes `ABI.md`, and adds `--replay`. M8
+makes `sys_lockdown()` real.
 
 **Two boundaries worth knowing before you run this.** Filesystem access is
 bounded by what you preopen, with the gap described in ABI.md §8.0. **Network
-access is not bounded at all** — `socket` takes no capability and `connect`
-reaches anywhere the host can route. ABI.md §8.1 says so and explains why that
-is currently an open question. brainstem is not a sandbox.
+access is not bounded at all**, and a directory preopen carries the right to
+*run programs out of it* — see ABI.md §8.1. brainstem is not a sandbox, it
+runs with your credentials, and it can now start processes. Do not run
+brainfuck you did not write.
 
 ## The operations
 
-Twenty-three, specified in [ABI.md](ABI.md). Twenty are built.
+Twenty-three, specified in [ABI.md](ABI.md). All built.
 
 | | |
 |---|---|
-| `hello` `exit` | **built** — handshake, version negotiation, teardown |
-| `clock_now` | **built** — realtime and monotonic, steerable with `--clock` |
-| `random_bytes` | **built** — from the kernel, or from a seed with `--seed` |
-| `read` `write` `close` `poll` | **built** — files, pipes and sockets alike |
-| `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | **built** — beneath a preopened directory |
-| `socket` `connect` `bind` `listen` `accept` | **built** — IPv4 and IPv6; Unix is declared and answers NOTSUP |
-| `pipe` `spawn` `wait` | M6 — **which is how one program drives another** |
+| `hello` `exit` | handshake, version negotiation, teardown |
+| `clock_now` | realtime and monotonic, steerable with `--clock` |
+| `random_bytes` | from the kernel, or from a seed with `--seed` |
+| `read` `write` `close` `poll` | files, pipes and sockets alike |
+| `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | beneath a preopened directory |
+| `socket` `connect` `bind` `listen` `accept` | IPv4 and IPv6; Unix is declared and answers NOTSUP |
+| `pipe` `spawn` `wait` | **how one program drives another** |
 
 ## Other languages
 

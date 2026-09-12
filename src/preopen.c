@@ -85,11 +85,16 @@ static bs_err install_one(size_t i, bs_u32 *handle) {
         e = sys_open_host(arg, BS_O_READ | BS_O_DIRECTORY, &fd);
         if (e != BS_OK) return e;
         kind   = BS_HK_DIR;
-        /* A directory preopen carries everything a directory can do. Narrower
-         * sets are useful and are what --preopen-file is for; splitting a
-         * directory's rights further would need a syntax nobody has asked
-         * for yet, and an unused syntax is a thing that rots. */
-        rights = BS_R_READ | BS_R_WRITE | BS_R_SEEK | BS_R_CREATE | BS_R_DELETE | BS_R_LIST;
+        /* A directory preopen carries everything a directory can do, EXEC
+         * included, so spawn can run a program out of it. Narrower sets are
+         * useful and are what --preopen-file is for; splitting a directory's
+         * rights further needs a syntax that should arrive with the
+         * capability work at M7 and M8, alongside the answer to the ambient
+         * network question in ABI.md section 8.1. Until then EXEC is granted
+         * with the rest and the right narrows only through derived handles --
+         * which is honest, and the same posture the network already has. */
+        rights = BS_R_READ | BS_R_WRITE | BS_R_SEEK | BS_R_CREATE | BS_R_DELETE
+               | BS_R_LIST | BS_R_EXEC;
         break;
 
     case BS_PRE_FILE: {

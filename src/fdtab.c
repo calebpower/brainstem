@@ -21,6 +21,8 @@ void bs_fdtab_init(void) {
         tab[i].namelen = 0;
         tab[i].preopen = 0;
         tab[i].netstate = 0;
+        tab[i].pid = 0;
+        tab[i].reaped = 0;
     }
 }
 
@@ -45,6 +47,9 @@ bs_err bs_fdtab_alloc(bs_u8 kind, bs_u16 rights, bs_osfd fd, bs_u32 *handle) {
         tab[i].namelen = 0;
         tab[i].preopen = 0;
         tab[i].netstate = 0;
+        tab[i].pid = 0;
+        tab[i].reaped = 0;
+        tab[i].pstate = tab[i].pcode = tab[i].psig = 0;
         *handle = handle_of(i);
         return BS_OK;
     }
@@ -93,6 +98,11 @@ bs_err bs_fdtab_free(bs_u32 handle) {
         if (e2 != BS_OK) e = e2;
         s->dir = 0;
     }
+    /* A process handle holds no descriptor, which is why BS_OSFD_NONE is a
+     * value and not merely an initialiser. Closing one does NOT kill the
+     * child: the program asked to stop tracking it, not to end it, and a
+     * close that killed things would be the most surprising op in the ABI.
+     * An unreaped child is inherited by init when the broker exits. */
     if (s->fd != BS_OSFD_NONE) {
         e2 = sys_close(s->fd);
         if (e2 != BS_OK) e = e2;
@@ -107,6 +117,8 @@ bs_err bs_fdtab_free(bs_u32 handle) {
     tab[i].namelen = 0;
     tab[i].preopen = 0;
     tab[i].netstate = 0;
+    tab[i].pid = 0;
+    tab[i].reaped = 0;
     /* The slot is free and its generation has moved on. Wrapping at 16 bits
      * is fine and is not a hole: a handle from 65536 closes ago is one the
      * program stopped being able to name long before the number came round,

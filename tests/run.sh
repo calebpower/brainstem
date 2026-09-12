@@ -443,7 +443,7 @@ run "readdir yields one entry then ends" sh -c '
 run "the preopen table describes the directory it was given" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
     ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
-        | grep -q "0100000002043f000000000004776f726b"'
+        | grep -q "0100000002047f000000000004776f726b"'
 
 
 # The five net ops, in one conversation, with no second process involved.
@@ -471,6 +471,51 @@ run "the port the program connects to is the port bind gave it" sh -c '
 run "accept reports a handle and a 32 byte peer address" sh -c '
     ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf 2>&1 >/dev/null \
         | grep -q "^brainstem: < 00 len=36 03000000"'
+
+
+# THE PAYOFF. A file containing nothing but the eight brainfuck instructions
+# creates two pipes, starts an interpreter on a SECOND brainfuck program with
+# those pipes as its stdin and stdout, sends it two bytes, reads its answer,
+# and collects its exit status.
+#
+# The directory is prepared here rather than by the fixture, because a
+# brainfuck program cannot copy a binary -- and it is prepared FRESH each
+# time, so nothing depends on what the last run left.
+bs_procdir() {
+    rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
+    cp build/bfi "$BS_TMP/proc/bfi"
+    cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
+}
+run "brainfuck drives brainfuck" sh -c '
+    rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
+    cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
+    ./build/brainstem --op-timeout 5000 --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf >/dev/null 2>&1'
+# The bytes went out through one pipe, through a second brainfuck program
+# running under its own interpreter, and back through another. A length check
+# alone would pass on a broker that echoed zeros.
+run "the bytes come back through the child" sh -c '
+    rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
+    cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
+    ./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=2 6869$"'
+run "the child exits 0 and wait reports it" sh -c '
+    rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
+    cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
+    ./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=4 01000000$"'
+# wait is idempotent after reaping: the kernel will only report a status once,
+# so the handle caches it. Two identical replies, from two identical requests.
+run "wait repeats itself after the child is reaped" sh -c '
+    rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
+    cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
+    got=$(./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf 2>&1 >/dev/null \
+          | grep -c "^brainstem: < 00 len=4 01000000$")
+    test "$got" = 2'
+run "pipe yields a read end and a write end, in that order" sh -c '
+    rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
+    cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
+    ./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/drive.bf 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=8 0200000003000000$"'
 
 # TIER 6
 echo
@@ -566,6 +611,30 @@ run "a refused connection is CONNREFUSED and not a raw errno" sh -c '
         | grep -q "^brainstem: < 20 len=0$"'
 run "and the program survives all of them and exits cleanly" sh -c '
     ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/refused.bf >/dev/null 2>&1'
+
+
+# The process refusals. The last two are the interesting pair: spawning a
+# program that does not exist SUCCEEDS, and the failure arrives as the child's
+# exit code 127 -- which is POSIX and what every shell reports. A broker that
+# hid it would have to wait for the child before answering, making every spawn
+# synchronous to make one error tidier.
+run "every process refusal lands on its own status, in order" sh -c '
+    rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
+    cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
+    got=$(./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/refused.bf 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < \(..\) .*/\1/p" | tr "\n" " ")
+    want="00 06 06 04 06 00 00 03 00 00 "
+    if [ "$got" != "$want" ]; then
+        echo "wanted: $want"
+        echo "got:    $got"
+        exit 1
+    fi
+    exit 0'
+run "a child that could not exec is reported as exit 127" sh -c '
+    rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
+    cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
+    ./build/brainstem --op-timeout 5000 --trace --preopen-dir work="$BS_TMP/proc" -- ./build/bfi bf/proc/refused.bf 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=4 017f0000$"'
 
 # TIER 7
 echo

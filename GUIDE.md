@@ -247,7 +247,7 @@ again.
 
 ---
 
-## 6. Six worked programs
+## 6. Eight worked programs
 
 These are not written out here by hand. **They are the fixtures the test suite
 runs**, quoted verbatim, and `tests/run.sh` checks that what appears
@@ -566,6 +566,133 @@ READ 3
 **There is no capability gate on `socket`.** A program that can reach the
 broker can reach the network — see ABI.md §8.1, which says so plainly and
 explains why it is an open question rather than a decision.
+
+### Drive another brainfuck program
+
+The one this whole project exists for. Two pipes, a `spawn`, and a second
+brainfuck program running under its own interpreter with those pipes as its
+stdin and stdout.
+
+**Watch the closes.** After `spawn`, the outer program closes its own copies
+of the child's two ends. Without that the child never sees end of input and
+the outer program never sees end of file, and the whole thing deadlocks with
+no output and no core — the same failure shape §2.3 is about, arrived at from
+the other direction.
+
+**The environment is explicit.** A child gets exactly the variables you pass
+and nothing else, not even the broker's. Here that is load-bearing rather than
+tidy: the inner program is `,[.,]`, and under the interpreter's default `,` at
+end of input leaves the cell unchanged, so its loop would never terminate. The
+spawn passes `BFI_EOF=zero` and that is the whole of the child's environment.
+
+<!-- bf/proc/drive.poke -->
+```
+# drive.poke -- brainfuck driving brainfuck.
+#
+# THE POINT OF THE WHOLE PROJECT. A file containing nothing but the eight
+# brainfuck instructions creates two pipes, starts an interpreter on a SECOND
+# brainfuck program with those pipes as its stdin and stdout, sends it two
+# bytes, reads its answer, and collects its exit status.
+#
+# That is what makes brainfuck itself the harness: the sibling library's
+# primitives can be chained by a brainfuck program rather than by a shell
+# script, which is what the BoneMesh keyschedule conformance check needs.
+#
+# Run against a directory the suite prepares with the interpreter and
+# echo.bf in it, preopened as "work".
+#
+# WATCH THE CLOSES. After spawn, the outer program closes its own copies of
+# the child's two ends. Without that the child never sees end of input on its
+# stdin and the outer program never sees end of file on its stdout, and the
+# whole thing deadlocks with no output and no core -- the same failure shape
+# the hello timeout exists to diagnose, arrived at from the other direction.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.10 to 7.16.
+#
+#   hello  op 01, len 10.  One preopen: 3 + 48 + 12 + 5 = 68.
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 68
+#   pipe  op 0e, flags 0.  Handles 2 (read) and 3 (write): the outer program
+#   writes into 3 and the child reads from 2.
+EMIT 0e 02 00 00 00
+READ 11
+#   pipe again.  Handles 4 (read) and 5 (write): the child writes into 5 and
+#   the outer program reads from 4.
+EMIT 0e 02 00 00 00
+READ 11
+#   spawn  op 0f, len 0x35 = 53.
+#     dir 1, flags 0, nfdmap 2, nargv 2, nenv 1, reserved 0
+EMIT 0f 35 00 01 00 00 00 00 00 02 02 01 00
+#     the descriptor map: child fd 0 gets handle 2, child fd 1 gets handle 5.
+#     ANY CHILD DESCRIPTOR NOT NAMED HERE IS CLOSED, so the child gets these
+#     two and nothing else -- not even the broker's stderr.
+EMIT 00 02 00 00 00
+EMIT 01 05 00 00 00
+#     the path, u16 prefixed: "bfi", relative to the preopened directory
+EMIT 03 00 62 66 69
+#     argv: "bfi", "echo.bf"
+EMIT 03 00 62 66 69
+EMIT 07 00 65 63 68 6f 2e 62 66
+#     env: exactly one variable, "BFI_EOF=zero".  The environment is explicit
+#     and never inherited, so this is the whole of the child's environment --
+#     and echo.bf needs it, because the interpreter's default leaves the cell
+#     unchanged at end of input and its loop would never terminate.
+EMIT 0c 00 42 46 49 5f 45 4f 46 3d 7a 65 72 6f
+#     the reply is a process handle: 6
+READ 7
+#   close the outer copies of the child's two ends.  This is the step that is
+#   easy to forget and impossible to debug.
+EMIT 0c 04 00 02 00 00 00
+READ 3
+EMIT 0c 04 00 05 00 00 00
+READ 3
+#   write  op 0b, handle 3, flags 0, "hi" -- into the child's stdin
+EMIT 0b 08 00 03 00 00 00 00 00 68 69
+READ 5
+#   close handle 3, so the child sees end of input and stops
+EMIT 0c 04 00 03 00 00 00
+READ 3
+#   read  op 0a, handle 4, n 8 -- the child's stdout.  Two bytes: "hi", which
+#   went out through one pipe, through a second brainfuck program, and back
+#   through another.
+EMIT 0a 08 00 04 00 00 00 08 00 00 00
+READ 5
+#   read again: the child has exited and closed its end, so this is END with
+#   an empty payload
+EMIT 0a 08 00 04 00 00 00 08 00 00 00
+READ 3
+#   wait  op 10, handle 6, flags 0 -- blocking.  state 1 exited, code 0.
+EMIT 10 06 00 06 00 00 00 00 00
+READ 7
+#   wait again: idempotent after reaping, from the cached status
+EMIT 10 06 00 06 00 00 00 00 00
+READ 7
+EMIT 0c 04 00 04 00 00 00
+READ 3
+EMIT 0c 04 00 06 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3
+```
+
+The inner program, which speaks no protocol at all:
+
+<!-- bf/proc/echo.poke -->
+```
+# echo.poke -- the INNER program. Not a brainstem client at all.
+#
+# This is the one fixture in the tree that speaks no protocol: it reads bytes
+# and writes them back until end of input, which is the classic brainfuck cat.
+# It exists to be run BY another brainfuck program, through spawn, with its
+# stdin and stdout wired to pipes the outer program created.
+#
+# It needs BFI_EOF=zero to terminate, and the outer program passes exactly
+# that and nothing else -- see drive.poke. Under the interpreter's default,
+# ',' at end of input leaves the cell holding the last byte read, and this
+# loop would echo it forever.
+,[.,]
+```
 
 ### And every way it can say no
 

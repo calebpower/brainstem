@@ -51,9 +51,9 @@ OP(0x0C, CLOSE,        op_io_close,    4,     0)
 OP(0x0D, POLL,         op_io_poll,  BS_VAR,   BS_VAR)
 
 /* ---- proc: what makes one program able to drive another ---------------- */
-OP(0x0E, PIPE,         NULL,           2,     8)
-OP(0x0F, SPAWN,        NULL,      BS_VAR,     4)
-OP(0x10, WAIT,         NULL,           6,     4)
+OP(0x0E, PIPE,         op_proc_pipe,   2,     8)
+OP(0x0F, SPAWN,        op_proc_spawn,BS_VAR,  4)
+OP(0x10, WAIT,         op_proc_wait,   6,     4)
 
 /* ---- fs ---------------------------------------------------------------- */
 OP(0x11, OPEN,         op_fs_open,  BS_VAR,   4)

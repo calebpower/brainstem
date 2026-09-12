@@ -17,6 +17,7 @@
 
 #include "ops.h"
 #include "fdtab.h"
+#include "path.h"
 
 static bs_err want(bs_u32 h, bs_u16 rights, struct bs_slot **out) {
     struct bs_slot *s = bs_fdtab_get(h);
@@ -45,26 +46,16 @@ static bs_err want_dir(bs_u32 h, bs_u16 rights, struct bs_slot **out) {
     return BS_OK;
 }
 
-/* Copy the rest of the payload out as a path, and refuse it if it is not one.
+/* Copy the rest of the payload out as a path, having checked it.
  *
- * FOUR REFUSALS, each with a defect behind it:
- *
- *   empty        an empty path is not the directory itself except where an op
- *                says so, and silently meaning "." would make a typo succeed
- *   embedded NUL the seam needs a C string, so a path with a NUL in it would
- *                reach the kernel truncated -- the classic way a check and a
- *                use come to disagree about the same bytes
- *   absolute     there are no absolute paths in this ABI at all
- *   ".."         the only relative component that can leave the directory
- *
- * The last two are the string check that stands in for kernel confinement
- * until M8. It is honest about its limit: a SYMLINK pointing upward defeats
- * it, and that is why sys_beneath_is_kernel() exists and why ABI.md does not
- * call this a sandbox. */
+ * The rule itself lives in path.c, because op_proc needs the same one and a
+ * security-relevant rule written down twice is a rule that will be corrected
+ * once. This function is the copy and the length bound; bs_path_check is the
+ * judgement. */
 static bs_err path_of(struct bs_cur *c, char *buf, size_t cap, int allow_empty) {
     size_t n = bs_cur_left(c);
     const unsigned char *p = bs_get_bytes(c, n);
-    size_t i, seg;
+    bs_err e;
 
     if (!bs_cur_ok(c)) return BS_BADLEN;
     if (n == 0) {
@@ -73,19 +64,8 @@ static bs_err path_of(struct bs_cur *c, char *buf, size_t cap, int allow_empty) 
         return BS_OK;
     }
     if (n >= cap) return BS_NAMETOOLONG;
-    for (i = 0; i < n; i++) if (p[i] == '\0') return BS_INVAL;
-    if (p[0] == '/') return BS_INVAL;
-
-    /* Walk the components without writing anything yet. ".." is refused
-     * anywhere, not only at the front: a/../../b climbs just as well. */
-    seg = 0;
-    for (i = 0; i <= n; i++) {
-        if (i == n || p[i] == '/') {
-            size_t len = i - seg;
-            if (len == 2 && p[seg] == '.' && p[seg + 1] == '.') return BS_DENIED;
-            seg = i + 1;
-        }
-    }
+    e = bs_path_check(p, n);
+    if (e != BS_OK) return e;
 
     memcpy(buf, p, n);
     buf[n] = '\0';

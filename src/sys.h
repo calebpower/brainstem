@@ -243,6 +243,62 @@ bs_err sys_accept(bs_osfd fd, int nowait, bs_osfd *out, bs_addr *peer);
  * not ship, so family 3 answers NOTSUP on both. */
 bs_u8 sys_net_family_supported(bs_u32 family);
 
+/* ---- processes ---------------------------------------------------------- */
+
+/* SIGNAL NUMBERS ARE BRAINSTEM'S OWN. SIGUSR1 is 30 on FreeBSD and 10 on
+ * Linux, SIGBUS is 10 and 7. That several of these happen to match Linux is a
+ * coincidence of history and is NOT the contract -- the mapping lives at the
+ * seam and a program may only ever read these names. */
+#define BS_SIG_UNKNOWN 0
+#define BS_SIG_HUP     1
+#define BS_SIG_INT     2
+#define BS_SIG_QUIT    3
+#define BS_SIG_ILL     4
+#define BS_SIG_TRAP    5
+#define BS_SIG_ABRT    6
+#define BS_SIG_BUS     7
+#define BS_SIG_FPE     8
+#define BS_SIG_KILL    9
+#define BS_SIG_USR1   10
+#define BS_SIG_SEGV   11
+#define BS_SIG_USR2   12
+#define BS_SIG_PIPE   13
+#define BS_SIG_ALRM   14
+#define BS_SIG_TERM   15
+
+/* wait's state byte */
+#define BS_PS_RUNNING  0
+#define BS_PS_EXITED   1
+#define BS_PS_SIGNALLED 2
+
+/* One entry of spawn's descriptor map: the child sees child_fd, the broker
+ * hands over fd. ANY CHILD DESCRIPTOR NOT NAMED IN THE MAP IS CLOSED, which
+ * is what makes inheritance auditable rather than accidental -- everything
+ * this broker opens is close-on-exec, so the map is not merely the intended
+ * set, it is the whole set. */
+typedef struct {
+    bs_u8   child_fd;
+    bs_osfd fd;
+} bs_fdmap;
+
+#define BS_SPAWN_MAXFD 16
+#define BS_SPAWN_MAXV  64
+
+bs_err sys_pipe(bs_osfd *rd, bs_osfd *wr);
+
+/* argv and envp are NULL terminated arrays, as execve wants them. path is
+ * relative to dir, like every other path in this ABI.
+ *
+ * *pid is opaque above the seam and never reaches the wire: pids differ
+ * between runs and between platforms, and the wire must not. The program gets
+ * a process HANDLE out of the same table every other handle comes from. */
+bs_err sys_spawn(bs_osfd dir, const char *path,
+                 char *const *argv, char *const *envp,
+                 const bs_fdmap *map, size_t nmap, bs_i64 *pid);
+
+/* nowait asks whether it has finished rather than waiting for it to. */
+bs_err sys_wait(bs_i64 pid, int nowait, bs_u8 *state, bs_u8 *code, bs_u8 *sig);
+
 /* ---- the filesystem half of the seam ------------------------------------
  *
  * Every path is RELATIVE TO A DIRECTORY DESCRIPTOR. There is no call here

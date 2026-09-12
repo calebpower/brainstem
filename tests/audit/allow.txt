@@ -130,6 +130,28 @@ sys_net close
 sys_net htons ?
 sys_net ntohs ?
 
+# ---- sys_proc.c: the process half of the seam ----
+#
+# This is the whole of brainstem's ability to start a program. There is no
+# system(), no popen, no shell anywhere on this list and there will not be
+# one: spawn takes a path and an argv and never a command line, so there is
+# nothing for a quoting bug to become.
+#
+# fchdir is here rather than posix_spawn because there is no posix_spawnat and
+# every path in this ABI resolves beneath a directory handle. See the header
+# of sys_proc.c for why fexecve was not the answer either.
+sys_proc errno
+sys_proc fork
+sys_proc execve
+sys_proc fchdir
+sys_proc pipe
+sys_proc dup2
+sys_proc fcntl
+sys_proc close
+sys_proc waitpid
+sys_proc signal
+sys_proc _exit
+
 # ---- compiler lowerings, marked optional with a trailing "?" ----
 #
 # These are not dependencies this program asked for. A C compiler is free to
