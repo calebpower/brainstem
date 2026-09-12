@@ -768,7 +768,42 @@ built.
    M8 was deleted rather than built; the section below says why, and
    `CONVENTIONS.md` carries the short version beside the milestone table.
 
-2. **Smaller things, none of them blocking.**
+2. **THE SEAM WITH bfsodium, WHICH NOTHING TESTS.** Not scheduled, and the
+   largest real gap either project has.
+
+   `bf/proc/drive.poke` proves a brainfuck program can drive a brainfuck
+   program: two pipes, a spawn, two bytes in, two bytes out. The inner program
+   is `echo.bf`, which is `,[.,]`. What that does NOT prove is the thing the
+   whole three-phase scheme was designed around -- that a brainfuck program
+   can take one REAL primitive's output and make it the next primitive's
+   input, with no shell in the middle.
+
+   bfsodium gates every routine against Cryptol and the RFCs. brainstem gates
+   the broker across two kernels. **Neither gates the join**, and a seam
+   between two well tested things is exactly where this project keeps finding
+   its defects.
+
+   It is bfsodium's blocker too, and their HANDOFF now says so: v1.0.0 is
+   being held until the composition story has run end to end, because a
+   library's claim is that its primitives compose and bfsodium's composition
+   is currently source-level pasting through `bfexpand`.
+
+   **The work probably belongs HERE and not there.** bfsodium's rulebook says
+   it is pure computation with no syscalls and no P1 broker -- the boundary
+   declaration the phase vocabulary was recovered from -- so a tier there that
+   runs this broker contradicts it. A tier here that vendors one bfsodium
+   routine as a fixture does not, and this repository already vendors
+   `tools/bfi.c` with its deltas recorded, so the pattern and its soft spot
+   are both established.
+
+   Two constraints before anyone starts. The primitive must be chosen on
+   MEASURED cost -- bfsodium's AEAD is 11.58 billion interpreter instructions
+   and is not gateable, `blockloop` is 686 million at about 1.4 seconds, and
+   SHA-256 is not in their cost table at all. And it is one piece of work with
+   the BoneMesh corpus check rather than two, since that check is nine
+   sequenced calls and this is its first two.
+
+3. **Smaller things, none of them blocking.**
    - `bf/net/loopback.bf` and `bf/proc/drive.bf` have no pinned trace, because
      an ephemeral port and a child's timing are not the program's to determine.
      A mask could bring the port under tier 10 the way the stat mtime is; the
