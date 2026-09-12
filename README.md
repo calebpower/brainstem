@@ -48,7 +48,8 @@ That last line is the point of ABI.md §5. The slot was reused and the handle
 was not: a program still holding the old one gets `BADF` rather than somebody
 else's file.
 
-Milestone M4. `ctl.hello`, `ctl.exit`, `time.clock_now`, `rand.random_bytes`,
+Milestone M4, **gated: 148 pass, 0 fail on `freebsd-15.1` and on
+`ubuntu-26.04`.** `ctl.hello`, `ctl.exit`, `time.clock_now`, `rand.random_bytes`,
 `io.read`, `io.write`, `io.close`, `io.poll`, `fs.open`, `fs.seek`, `fs.stat`,
 `fs.readdir`, `fs.unlink`, `fs.mkdir` and `fs.rename` are built. The other
 eight are declared and answer NOSUCHOP, which is recoverable — the payload is

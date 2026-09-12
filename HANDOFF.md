@@ -18,8 +18,28 @@ left.
     > 11 len=9      open "f", READ
     < 00 len=4      OK, handle 0x00010002 -- same slot, next generation
 
-**Gated on Linux: 148 pass, 0 fail in the container lane. THE FREEBSD HALF OF
-M4 HAS NOT RUN.** M3 was 132 on both guests, M2 was 94, M0 was 22.
+**Gated: 148 pass, 0 fail on `freebsd-15.1` and 148 pass, 0 fail on
+`ubuntu-26.04`.** M3 was 132 on both guests, M2 was 94, M0 was 22.
+
+**The FreeBSD half passed first time, and this was the largest platform
+surface the project has added in one go** -- nineteen seam calls, a handle
+table, preopens and eleven ops, none of it runnable from the development host
+before it was pushed. That is the second time a blind write has held (M0 was
+the first) and it is worth saying why, because the three failures in between
+had a shape and this did not.
+
+Everything that failed on FreeBSD at M2 and M3 was a place where a SPECIFIC
+FACT about the platform had been written down: perl is in base, `strtonum`
+exists, `wc` does not pad, the timekeeping page serves `clock_gettime`,
+`arc4random_buf` costs one syscall. Everything that held was a MECHANISM for
+discovering the fact instead: `bsaudit` parses two `nm` conventions, `bscalls`
+parses `kdump` and `strace` in one file, the seam names no POSIX type, and
+`readdir` stats unconditionally rather than trusting a `d_type` that neither
+kernel is obliged to fill in.
+
+That is the rule this project has actually learned. Write the mechanism, not
+the fact -- and where a fact is unavoidable, label it as unmeasured in the
+file that holds it, which is what `tests/syscalls/README` does.
 
 Fifteen of the twenty three ops are built. The other eight are declared in
 `src/ops.def` with a NULL handler and answer NOSUCHOP, which is recoverable.
