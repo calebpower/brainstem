@@ -21,6 +21,7 @@
  */
 #include "ops.h"
 #include "det.h"
+#include "fdtab.h"
 
 /* ABI.md section 3. Request: magic "BSTM", want_major u16, want_minor u16,
  * flags u16. Exactly ten bytes, and the dispatcher has already checked that
@@ -93,8 +94,47 @@ bs_err op_ctl_hello(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) 
      * what lets a trace be replayed from the trace alone. When no seed is in
      * force these are sixteen zeros, which is also the value that says so. */
     bs_put_bytes(rep, det_seed_bytes(), 16);
-    bs_put_u16(rep, 0);       /* npreopen: none until M4 */
-    bs_put_u16(rep, 0);       /* nametail_len */
+    /* The preopen table, and the two counts that introduce it.
+     *
+     * Positional, with no name discovery op, because a brainfuck program
+     * cannot usefully compare strings and there is nothing intelligent it
+     * could do with a name it discovered. What it CAN read cheaply is each
+     * preopen's kind and rights, which is what the table carries, at no
+     * round trip cost at all. */
+    {
+        size_t i, n = bs_fdtab_count();
+        unsigned int npre = 0, tail = 0;
+        for (i = 1; i < n; i++) {
+            struct bs_slot *s = bs_fdtab_slot(i);
+            if (!s || !s->preopen) continue;
+            npre++;
+            tail += 1u + s->namelen;
+        }
+        bs_put_u16(rep, npre);
+        bs_put_u16(rep, tail);
+
+        for (i = 1; i < n; i++) {
+            struct bs_slot *s = bs_fdtab_slot(i);
+            if (!s || !s->preopen) continue;
+            bs_put_u32(rep, bs_fdtab_handle_of(i));
+            bs_put_u8 (rep, s->kind);
+            bs_put_u8 (rep, s->namelen);
+            bs_put_u16(rep, s->rights);
+            bs_put_zero(rep, 4);
+        }
+
+        /* The name tail: one length byte then the bytes, per entry, in the
+         * same order. A program that does not care reads 48 + 12 * npreopen
+         * and then counts nametail_len bytes away; one that does walks it
+         * with a u8 counter. Both are flat loops, which is the entire design
+         * requirement. */
+        for (i = 1; i < n; i++) {
+            struct bs_slot *s = bs_fdtab_slot(i);
+            if (!s || !s->preopen) continue;
+            bs_put_u8(rep, s->namelen);
+            if (s->namelen) bs_put_bytes(rep, (const unsigned char *)s->name, s->namelen);
+        }
+    }
 
     if (!bs_buf_ok(rep)) return BS_IO;
     ctx->hello_done = 1;

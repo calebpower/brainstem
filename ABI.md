@@ -598,8 +598,13 @@ something that cannot be interrupted.
 the broker fills it in with a stat. That is a documented departure from
 one-request-one-syscall and it is what makes the two platforms indistinguishable.
 
-Directory order is filesystem dependent and differs across platforms;
-`--sort-readdir` normalises it (§9).
+Directory order is filesystem dependent and differs across platforms.
+`--sort-readdir` will normalise it and **does not exist yet**: sorting means
+holding a whole directory at once, and there is no allocation on the ABI path,
+so it needs a bounded design rather than an afternoon. It is M7. Until then a
+program that cares about order must sort what it reads, and a *test* that
+cares must use a directory with one entry in it — which is what
+`bf/fs/roundtrip.poke` does, and why.
 
 ### 7.21–7.23 `unlink` `mkdir` `rename`
 
@@ -624,12 +629,39 @@ secondary platform.
 
 **Nothing is reachable that was not named on the broker's command line.** There
 are no absolute paths in this ABI; every filesystem op resolves beneath a
-preopened directory, so escape is refused by the kernel rather than by string
-matching in the broker. Default policy is deny: with no flags, only `hello`,
+preopened directory. Default policy is deny: with no flags, only `hello`,
 `exit`, `clock_now` and `random_bytes` work.
 
 This is a usability and determinism feature. **It is not a containment claim** —
 see the non-goals in CONVENTIONS.
+
+### 8.0 What enforces it, exactly
+
+An earlier draft of this section said escape was refused by the kernel rather
+than by string matching in the broker. **That is not true as of M4 and the
+sentence has been corrected rather than left to flatter the design.** What
+actually happens today:
+
+| refusal | by |
+|---|---|
+| an absolute path | the broker, `INVAL` |
+| any `..` component, anywhere in the path | the broker, `DENIED` |
+| a path containing a NUL byte | the broker, `INVAL` |
+| a **symlink** pointing outside the preopen | **nothing** |
+
+The last row is the honest gap. A string check cannot see through a symlink,
+so a preopened directory containing one is not confined. Both platforms can
+close it in the kernel and neither does it the same way — FreeBSD has
+`O_RESOLVE_BENEATH` as a plain open flag, Linux has the equivalent only
+through `openat2` — so both land at M8 beside `sys_lockdown()`, which is the
+milestone where confinement stops being a usability feature and becomes a
+claim. `sys_beneath_is_kernel()` reports which mechanism is in force, and it
+returns 0 on both platforms today.
+
+Until then: **the preopen set bounds what a program can NAME, not what it can
+REACH.** Do not preopen a directory whose contents you do not control and
+expect the result to be a sandbox. brainstem is not a sandbox (CONVENTIONS,
+named non-goals), and this is one of the reasons why.
 
 ### 8.1 Command line
 
@@ -674,7 +706,7 @@ never generated" — and a syscall broker cannot keep that rule. So it keeps the
 | `--clock frozen[=EPOCH]` | built | every `clock_now` returns the same instant |
 | `--clock virtual[=EPOCH][,step=NS]` | built | advances by `step` **per request**, not per wall-clock second |
 | `--trace` | built | prints every frame, both directions, payload in hex, to stderr |
-| `--sort-readdir` | M4 | normalises directory order |
+| `--sort-readdir` | M7 | normalises directory order |
 | `--replay FILE` | M7 | re-runs against a recorded trace with **no syscalls at all** |
 
 A malformed seed or clock spec is **refused, never repaired**. A seed that was

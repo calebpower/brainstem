@@ -34,6 +34,7 @@
 #include "ops.h"
 #include "det.h"
 #include "sys.h"
+#include "preopen.h"
 
 static void usage(const char *me) {
     fprintf(stderr,
@@ -326,6 +327,19 @@ int main(int argc, char **argv) {
                 fprintf(stderr,
                     "brainstem: --clock takes live, frozen[=EPOCH], or\n"
                     "brainstem: virtual[=EPOCH][,step=NS].\n");
+                return BS_EXIT_USAGE;
+            }
+            continue;
+        }
+        /* The preopens. Collected here and installed by the broker, so a
+         * typo in the fifth is reported before the first has opened
+         * anything. */
+        if (strcmp(a, "--preopen-dir") == 0 || strcmp(a, "--preopen-file") == 0 ||
+            strcmp(a, "--preopen-fd") == 0) {
+            int k = a[10] == 'd' ? BS_PRE_DIR : (a[10] == 'f' && a[11] == 'i' ? BS_PRE_FILE : BS_PRE_FD);
+            if (i + 1 >= argc) { usage(argv[0]); return BS_EXIT_USAGE; }
+            if (bs_preopen_add(k, argv[++i]) != BS_OK) {
+                fprintf(stderr, "brainstem: %s takes NAME=VALUE\n", a);
                 return BS_EXIT_USAGE;
             }
             continue;

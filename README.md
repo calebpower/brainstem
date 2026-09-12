@@ -28,56 +28,53 @@ is also what makes the broker indifferent to which language is on the far end.
 
 ## Status
 
-**It works, for four of twenty three operations.** A file containing nothing
-but the eight brainfuck instructions, run under a general purpose interpreter,
-reaches an operating system and comes back — and since M3 what comes back can
-be a clock reading or sixteen bytes from the kernel:
+**It works, for fifteen of twenty three operations.** A file containing
+nothing but the eight brainfuck instructions, run under a general purpose
+interpreter, now creates a directory, creates a file, writes to it, reads it
+back, seeks it, stats it, renames it, removes it and enumerates what is left:
 
 ```
-> 01 len=10     hello
-< 00 len=48     OK, the 48 byte record
-> 04 len=2      random_bytes, n = 16
-< 00 len=16     82233aa0ca0a14573efd34e9a85da697
-> 02 len=1      exit 0
+> 11 len=9      open "f", WRITE|CREATE|TRUNC, mode 0644
+< 00 len=4      OK, handle 2
+> 0b len=8      write handle 2, "hi"
+< 00 len=2      OK, 2 bytes written
+> 0c len=4      close handle 2
 < 00 len=0      OK
+> 11 len=9      open "f", READ
+< 00 len=4      OK, handle 0x00010002 -- same slot, next generation
 ```
 
-Those sixteen bytes are the same on every machine, because that run passed
-`--seed`. Under a seed the generator is a ChaCha20 keystream computed in the
-broker and **no syscall is issued at all** — which is not a claim, it is
-`tests/syscalls/linux/rand.seeded.txt`, an empty file next to
-`rand.live.txt`, which has one `getrandom` in it.
+That last line is the point of ABI.md §5. The slot was reused and the handle
+was not: a program still holding the old one gets `BADF` rather than somebody
+else's file.
 
-Milestone M3, **gated: 132 pass, 0 fail on `freebsd-15.1` and on
-`ubuntu-26.04`.**
+Milestone M4. `ctl.hello`, `ctl.exit`, `time.clock_now`, `rand.random_bytes`,
+`io.read`, `io.write`, `io.close`, `io.poll`, `fs.open`, `fs.seek`, `fs.stat`,
+`fs.readdir`, `fs.unlink`, `fs.mkdir` and `fs.rename` are built. The other
+eight are declared and answer NOSUCHOP, which is recoverable — the payload is
+consumed and the stream stays in step, because that is the forward
+compatibility path for a program written against a later version.
 
-`ctl.hello`, `ctl.exit`, `time.clock_now` and `rand.random_bytes` are built.
-The other nineteen are declared and answer NOSUCHOP, which is recoverable —
-the payload is consumed and the stream stays in step, because that is the
-forward compatibility path for a program written against a later version.
-
-Read that for what it is. `ctl` was chosen first precisely because it crosses
-no platform boundary, so M2 proved the *channel*: the pipe topology, the half
-duplex discipline the deadlock proof rests on, and the diagnosis for the
-interpreter buffering defect. M3 then took the seam's shape from a real
-divergence rather than a hypothesis — `arc4random_buf` on FreeBSD against
-`getrandom` on Linux — which is why time and randomness came before files.
-Sockets, files and processes are still ahead.
+**Nothing is reachable that was not named on the command line.** There are no
+absolute paths in the ABI; every filesystem op resolves beneath a preopened
+directory. Read ABI.md §8.0 for exactly what enforces that today and what does
+not — in particular, a symlink out of a preopened directory is **not** refused
+yet. brainstem is not a sandbox.
 
 ## The operations
 
-Twenty-three, specified in [ABI.md](ABI.md). Four are built; the rest answer
-NOSUCHOP until their milestone.
+Twenty-three, specified in [ABI.md](ABI.md). Fifteen are built; the rest
+answer NOSUCHOP until their milestone.
 
 | | |
 |---|---|
 | `hello` `exit` | **built** — handshake, version negotiation, teardown |
 | `clock_now` | **built** — realtime and monotonic, steerable with `--clock` |
 | `random_bytes` | **built** — from the kernel, or from a seed with `--seed` |
+| `read` `write` `close` `poll` | **built** — files, pipes and sockets alike |
+| `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | **built** — beneath a preopened directory |
 | `socket` `connect` `bind` `listen` `accept` | M5 |
-| `read` `write` `close` `poll` | M4 — files, pipes and sockets alike |
 | `pipe` `spawn` `wait` | M6 — **which is how one program drives another** |
-| `open` `seek` `stat` `readdir` `unlink` `mkdir` `rename` | M4 |
 
 ## Other languages
 

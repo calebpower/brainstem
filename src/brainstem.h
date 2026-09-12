@@ -54,6 +54,17 @@
 #define BS_EXIT_TIMEOUT 71
 #define BS_EXIT_INTERP  72
 
+/* The longest path the ABI will carry, and the size of the one buffer a path
+ * is ever copied into.
+ *
+ * A path arrives on the wire as bytes with no terminator, and the seam needs
+ * a C string, so there is exactly one copy and it is into a fixed buffer --
+ * no allocation on the ABI path, here as everywhere. 1024 is under PATH_MAX
+ * on both platforms with room to spare; a longer path is NAMETOOLONG, which
+ * is a status the program can act on rather than a truncation it cannot
+ * detect. */
+#define BS_PATH_MAX 1024
+
 /* The two pipes, and the child on the far end of them. */
 struct bs_chan {
     int from_prog;   /* read: the interpreter's stdout */

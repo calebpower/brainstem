@@ -39,6 +39,7 @@
 #
 # Usage:  sh tools/bscalls.sh              measure and diff
 #         sh tools/bscalls.sh --record     write the expectation files
+#         sh tools/bscalls.sh --report     measure the not-yet-pinned cases
 #         sh tools/bscalls.sh --selftest   prove the extraction and the diff
 set -eu
 
@@ -48,8 +49,15 @@ repo=$(CDPATH= cd -- "$here/.." && pwd)
 # The broker's own plumbing. Excluded from every expectation, and listed here
 # once so that a new entry is a visible decision. A call that is not on this
 # list and not in an expectation file is a finding.
+#
+# fstat and lseek were on this list until M4 and are not any more. Nothing in
+# the broker's own loop calls either; they were here on the assumption that
+# libc startup would, which is the wrong side of the fork to be worrying
+# about. Leaving them would have hidden the two syscalls behind fs.stat and
+# fs.seek -- a baseline that swallows an op's own call makes the tier pass by
+# not looking, which is the failure this file already warns about twice.
 BASELINE="read write poll close fork wait4 sigprocmask sigaction sigreturn
-exit pipe dup2 execve kill ioctl fstat lseek"
+exit pipe dup2 execve kill ioctl"
 
 # Spellings that belong to the tracer rather than to the program.
 normalise_calls() {
@@ -118,6 +126,32 @@ rand.seeded|--seed 000102030405060708090a0b0c0d0e0f|bf/rand/bytes.bf
 EOT
 }
 
+# Cases that are MEASURED AND PRINTED but not yet compared against anything.
+#
+# This exists because of a lesson that cost two round trips through someone
+# else's afternoon. The first freebsd/ expectations in this tree were written
+# from what the platform documents rather than from a run, and two of the five
+# were wrong -- FreeBSD issues two clock_gettime calls where Linux issues
+# none, and arc4random_buf allocates its state with an mmap and a minherit on
+# first use. Neither was guessable and both were obvious the moment a machine
+# measured them.
+#
+# The filesystem ops landed at M4 on a development host that cannot reach the
+# primary platform, so writing freebsd/fs.*.txt here would be the same guess a
+# third time. Instead the suite MEASURES them on both guests and prints what
+# it saw, the run that prints them is the run that produces the expectation,
+# and they move into cases() above with a commit that says which platform said
+# what. A report is not a check and is not counted as one; the tier table
+# records tier 10a as covering the ops it actually covers.
+#
+# %W in the options is replaced with a directory created fresh for that case.
+observe_cases() {
+    cat <<'EOT'
+fs.roundtrip|--preopen-dir work=%W|bf/fs/roundtrip.bf
+fs.refused|--preopen-dir work=%W|bf/fs/refused.bf
+EOT
+}
+
 platform_dir() {
     case "$(uname -s)" in
         FreeBSD) echo freebsd ;;
@@ -129,6 +163,12 @@ platform_dir() {
 measure() {  # measure OPTS FIXTURE OUTFILE
     opts=$1; fixture=$2; out=$3
     t=${TMPDIR:-/tmp}/bscalls.$$
+    case "$opts" in
+        *%W*)
+            rm -rf "$t.work"; mkdir -p "$t.work"
+            opts=$(printf '%s' "$opts" | sed "s|%W|$t.work|")
+            ;;
+    esac
     case "$(uname -s)" in
         Linux)
             command -v strace >/dev/null 2>&1 || { echo "bscalls: no strace"; return 1; }
@@ -237,6 +277,25 @@ EOT
 if [ "${1:-}" = "--selftest" ]; then
     selftest
     exit $?
+fi
+
+if [ "${1:-}" = "--report" ]; then
+    cd "$repo"
+    [ -x build/brainstem ] || { echo "bscalls: no build/brainstem" >&2; exit 2; }
+    echo "bscalls: NOT YET PINNED, measured on $(platform_dir). Paste these into"
+    echo "bscalls: tests/syscalls/<platform>/ and move the case into cases()."
+    observe_cases | while IFS='|' read -r name opts fixture; do
+        [ -n "$name" ] || continue
+        out=${TMPDIR:-/tmp}/bscalls-obs.$$
+        if measure "$opts" "$fixture" "$out"; then
+            echo "bscalls: --- $name"
+            if [ -s "$out" ]; then sed 's/^/bscalls:     /' "$out"; else echo "bscalls:     (nothing beyond the baseline)"; fi
+        else
+            echo "bscalls: --- $name could not be measured"
+        fi
+        rm -f "$out"
+    done
+    exit 0
 fi
 
 cd "$repo"

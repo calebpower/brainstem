@@ -45,10 +45,10 @@ OP(0x08, LISTEN,       NULL,           6,     0)
 OP(0x09, ACCEPT,       NULL,           6,     36)
 
 /* ---- io: files, pipes and sockets alike -------------------------------- */
-OP(0x0A, READ,         NULL,           8,     BS_VAR)
-OP(0x0B, WRITE,        NULL,      BS_VAR,     2)
-OP(0x0C, CLOSE,        NULL,           4,     0)
-OP(0x0D, POLL,         NULL,      BS_VAR,     BS_VAR)
+OP(0x0A, READ,         op_io_read,     8,     BS_VAR)
+OP(0x0B, WRITE,        op_io_write, BS_VAR,   2)
+OP(0x0C, CLOSE,        op_io_close,    4,     0)
+OP(0x0D, POLL,         op_io_poll,  BS_VAR,   BS_VAR)
 
 /* ---- proc: what makes one program able to drive another ---------------- */
 OP(0x0E, PIPE,         NULL,           2,     8)
@@ -56,10 +56,10 @@ OP(0x0F, SPAWN,        NULL,      BS_VAR,     4)
 OP(0x10, WAIT,         NULL,           6,     4)
 
 /* ---- fs ---------------------------------------------------------------- */
-OP(0x11, OPEN,         NULL,      BS_VAR,     4)
-OP(0x12, SEEK,         NULL,          13,     8)
-OP(0x13, STAT,         NULL,      BS_VAR,     32)
-OP(0x14, READDIR,      NULL,           6,     BS_VAR)
-OP(0x15, UNLINK,       NULL,      BS_VAR,     0)
-OP(0x16, MKDIR,        NULL,      BS_VAR,     0)
-OP(0x17, RENAME,       NULL,      BS_VAR,     0)
+OP(0x11, OPEN,         op_fs_open,  BS_VAR,   4)
+OP(0x12, SEEK,         op_fs_seek,    13,     8)
+OP(0x13, STAT,         op_fs_stat,  BS_VAR,   32)
+OP(0x14, READDIR,      op_fs_readdir,  6,     BS_VAR)
+OP(0x15, UNLINK,       op_fs_unlink,BS_VAR,   0)
+OP(0x16, MKDIR,        op_fs_mkdir, BS_VAR,   0)
+OP(0x17, RENAME,       op_fs_rename,BS_VAR,   0)

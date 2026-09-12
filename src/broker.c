@@ -34,6 +34,8 @@
 #include "ops.h"
 #include "sys.h"
 #include "det.h"
+#include "fdtab.h"
+#include "preopen.h"
 
 /* Two fixed buffers and no allocation on the ABI path, per CONVENTIONS
  * section 5. A frame is at most three bytes of header and a u16 of payload,
@@ -163,10 +165,27 @@ int bs_broker_run(const struct bs_opts *o) {
     ctx.exiting    = 0;
     ctx.exit_code  = 0;
 
-    /* The monotonic clock is normalised to zero here, before the child
-     * exists, so "time since the broker started" means the same thing in
-     * every run rather than encoding how long this machine has been up. */
-    sys_clock_init();
+    /* The seam's one-time startup: the monotonic origin is normalised to
+     * zero here, before the child exists, so "time since the broker started"
+     * means the same thing in every run rather than encoding how long this
+     * machine has been up. Anything else the seam would work out lazily goes
+     * here too -- see sys.h. */
+    sys_init();
+
+    /* The handle table, then the preopens, and both before the child so a
+    * bad --preopen-dir is reported before an interpreter has been started
+    * to receive a world that does not exist. Handles are assigned here, in
+    * command line order, starting at index 1. */
+    bs_fdtab_init();
+    {
+        size_t bad = 0;
+        bs_err pe = bs_preopen_install(&bad);
+        if (pe != BS_OK) {
+            fprintf(stderr, "brainstem: cannot open preopen %u (%s): %s\n",
+                    (unsigned)(bad + 1), bs_preopen_word(bad), bs_err_text(pe));
+            return BS_EXIT_USAGE;
+        }
+    }
 
     if (bs_child_start(&ch, o->interp, o->prog) != BS_OK) return BS_EXIT_INTERP;
 

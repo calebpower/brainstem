@@ -6,55 +6,85 @@ is actually built and where it has already bitten.
 
 ## State
 
-**Milestone M3 — the seam is in, and it is measured.** A file containing
-nothing but the eight brainfuck instructions, run under a general purpose
-interpreter, reaches an operating system, reads a clock, asks the kernel for
-randomness, and comes back.
+**Milestone M4 — the program has a filesystem.** A file containing nothing but
+the eight brainfuck instructions creates a directory, creates a file, writes
+to it, reads it back, seeks, stats, renames, unlinks, and enumerates what is
+left.
 
-    > 01 len=10     hello
-    < 00 len=48     OK, the 48 byte record
-    > 04 len=2      random_bytes, n = 16
-    < 00 len=16     82233aa0ca0a14573efd34e9a85da697
-    > 02 len=1      exit 0
+    > 11 len=9      open "f", WRITE|CREATE|TRUNC, mode 0644
+    < 00 len=4      OK, handle 2
+    > 0c len=4      close handle 2
     < 00 len=0      OK
+    > 11 len=9      open "f", READ
+    < 00 len=4      OK, handle 0x00010002 -- same slot, next generation
 
-**Gated: 132 pass, 0 fail on `freebsd-15.1` and 132 pass, 0 fail on
-`ubuntu-26.04`.** M2 was 94 on both guests, M0 was 22.
+**Gated on Linux: 148 pass, 0 fail in the container lane. THE FREEBSD HALF OF
+M4 HAS NOT RUN.** M3 was 132 on both guests, M2 was 94, M0 was 22.
 
-Four of the twenty three ops are built: `ctl.hello`, `ctl.exit`,
-`time.clock_now` and `rand.random_bytes`. The other nineteen are declared in
-`src/ops.def` with a NULL handler and answer NOSUCHOP, which is recoverable —
-the payload is consumed and the stream stays in step, because that is the
-forward compatibility path for a program written against a later minor
-version.
+Fifteen of the twenty three ops are built. The other eight are declared in
+`src/ops.def` with a NULL handler and answer NOSUCHOP, which is recoverable.
 
-`ctl` was chosen for M2 precisely because it does not cross the platform seam,
-and time and rand were chosen for M3 for the opposite reason: `arc4random_buf`
-against `getrandom` is a genuine divergence, so `src/sys.h` took its shape
-from one rather than from a hypothesis about what might diverge later.
+### What M4 added, and the two things to know before changing it
 
-### What M3 actually added, and why each piece is where it is
+- **`src/fdtab.c`, the handle table.** A handle is `(gen << 16) | index`,
+  never an OS fd. Generations start at 0 so the first handle is simply its
+  index, and only a reused slot carries one — the common case stays cheap to
+  emit and the dangerous case stays unforgeable. `bf/fs/roundtrip.poke`
+  demonstrates it in the trace on purpose.
+- **`src/preopen.c`.** Specs are collected while argv is parsed and installed
+  once, before the child starts, so a typo in the fifth preopen is reported
+  before the first has touched the filesystem.
+- **`src/op_io.c` and `src/op_fs.c`.** Both units reference NOTHING outside
+  themselves — the audit measures that, and it is the strongest single
+  statement in `tests/audit/allow.txt`.
+- **The seam grew nineteen calls and no exceptions.** Everything an op needs
+  goes through `sys.h`, which still names no POSIX type. `bs_osfd` is a
+  `bs_i64` rather than an `int` for the same reason `bs_time` is not a
+  `timespec`.
 
-- **`src/sys.h`, the seam.** No POSIX type appears in it. That one rule is
-  what keeps the wire identical across platforms and what will make a
-  `sys_win32.c` an implementation rather than a refactor.
-- **`src/det.c`, the determinism knobs**, read by exactly two ops. The
-  generator is ChaCha20 with a stated construction rather than a seeded
-  `arc4random`, because the bytes must be identical on both guests — and
-  because bfsodium implements ChaCha20 in brainfuck and verifies it against
-  RFC 8439, which makes the sibling an independent oracle for this broker's
-  RNG. `--selftest` checks it against the published zero-key vector and two
-  more computed outside this program.
-- **`--trace` now prints payloads.** That is what turns a trace into an
-  artifact a test can pin, and tiers 7 and 10 are both built on it. Lengths
-  alone could not have carried either.
-- **`tools/bsaudit.sh` and `tools/bscalls.sh`**, the two measured tiers. Read
-  the header of each; between them they buy what the abandoned syscall-lean
-  design was going to buy, on the platform where hand-written wrappers could
-  never have gone.
-- **`tests/trace/` and `tests/syscalls/`**, the pinned expectations. Both are
-  committed rather than observed at run time, which is the whole difference
-  between a parity tier and a tier that passes on two machines that disagree.
+**The two things that will bite.**
+
+`sys_dir_open` **dups the descriptor**, because `fdopendir` takes ownership and
+`closedir` closes what it was given. The caller still owns its own fd and is
+entitled to `stat` and `openat` through it afterwards. Getting this wrong
+gives a handle whose descriptor dies when enumeration ends, which presents as
+the *next* op on that handle failing for no visible reason.
+
+`readdir` **always costs a stat**, deliberately. The obvious version reads
+`d_type` and stats only on `DT_UNKNOWN`, but `d_type` is not POSIX: glibc
+hides it unless `_DEFAULT_SOURCE` is defined, and `sys_posix.c` may not be
+compiled with a namespace widening macro. Reaching for it would have meant
+moving `readdir` into both platform files or widening the portable half's
+namespace, to save one syscall on an op that already costs a round trip
+through a brainfuck interpreter. Statting unconditionally also makes the
+platforms identical by construction: neither kernel is obliged to fill
+`d_type` in, so a version that trusted it could produce different bytes on two
+filesystems of the *same* platform.
+
+### What M4 deliberately did not do
+
+**Confinement is still the broker's own string check.** Absolute paths and
+`..` components are refused; a **symlink** out of a preopened directory is
+not. ABI.md §8.0 says so in a table rather than implying otherwise — an
+earlier draft of that section claimed the kernel was doing it, which was never
+true and is now corrected. Both platforms can close the gap and neither does
+it the same way, so both land at M8 beside `sys_lockdown()`.
+
+**`--sort-readdir` does not exist.** Sorting means holding a whole directory
+at once and there is no allocation on the ABI path, so it needs a bounded
+design rather than an afternoon. It is M7. Until then a test that cares about
+directory order must use a directory with one entry in it, which is what
+`bf/fs/roundtrip.poke` does and why.
+
+**The filesystem ops are not in tier 10a yet, and that is a decision.** The
+syscall expectations for FreeBSD cannot be written from this development host
+without guessing, and guessing has cost two round trips already this project.
+So the suite MEASURES them on both guests and PRINTS what it saw —
+`sh tools/bscalls.sh --report`, run from tier 10a — and the run that prints
+them is the run that produces the expectation. Paste them into
+`tests/syscalls/<platform>/` and move the case from `observe_cases()` into
+`cases()`. Linux currently reports, for `fs.roundtrip`: 2 brk, 3 fcntl,
+5 fstat, 2 getdents64, 1 lseek, 1 mkdirat, 2 open, 1 renameat, 1 unlinkat.
 
 ### What the gate found that this host could not
 
@@ -133,13 +163,13 @@ marker in the suite at all.
 | 3a | yes | 2 | fixture legibility, and the expander knows no ABI |
 | 3b | no | 0 | the header does not lie — needs bsframe --decode wiring |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | yes | 6 | per-op round trip |
-| 6 | yes | 9 | error paths |
+| 5 | yes | 12 | per-op round trip |
+| 6 | yes | 12 | error paths |
 | 7 | yes | 12 | determinism: seed, frozen and virtual clock, both polarities |
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 4 | deadlock and timeout |
-| 10 | yes | 7 | platform parity, against traces pinned in tests/trace/ |
-| 10a | yes | 1 | per-op syscall surface, measured on both platforms |
+| 10 | yes | 10 | platform parity, against traces pinned in tests/trace/ |
+| 10a | yes | 1 | per-op syscall surface — ctl, time and rand pinned; fs reported only |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 10 | the tables and the lane definitions agree |
 | 11 | manual | 0 | mutation, a discipline rather than a check |
@@ -392,25 +422,20 @@ for.
 
 M0 through M3 are done. What remains:
 
-1. **M4 — handles, io and fs.** `fdtab.c` with generations, and eleven ops:
-   `read`, `write`, `close`, `seek`, `poll`, `open`, `stat`, `readdir`,
-   `unlink`, `mkdir`, `rename`. This is where tier 6 reaches full strength and
-   where `bs_stat` normalisation gets tested under tier 10. Handles are
-   `(gen << 16) | index` and never an OS fd, for a specific defect: the program
-   closes handle 3, the OS recycles fd 3, and a stale handle silently reads
-   someone else's socket.
-2. **M5 — net.** `socket`, `connect`, `bind`, `listen`, `accept`, plus
+1. **M5 — net.** `socket`, `connect`, `bind`, `listen`, `accept`, plus
    `tools/netecho.c` so the tier depends on no `nc` — whose flags differ
    between the two guests, which is a divergence forty lines of C removes.
-3. **M6 — proc.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and
+2. **M6 — proc.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and
    last because it is the hairiest: fd leaks, zombies, and `SIGCHLD` racing the
    broker's own reaping of the interpreter. **This is the payoff** — a
    brainfuck program spawning an interpreter on a second brainfuck program is
    what makes brainfuck itself the harness that can chain bfsodium's
    primitives.
-4. **M7 — the tiers that need all of it.** Tier 11 swept across every op;
-   metamorphic checks spanning ops. ABI.md frozen. `--replay`.
-5. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
+3. **M7 — the tiers that need all of it.** Tier 11 swept across every op;
+   metamorphic checks spanning ops. ABI.md frozen. `--replay`. Also
+   `--sort-readdir`, and moving the filesystem cases out of `bscalls`'
+   report list and into its pinned list.
+4. **M8 — purity.** `sys_lockdown()` made real: seccomp-notify on Linux,
    `cap_enter()` on FreeBSD. Expect ABI additions, since `cap_enter()` forces
    the preopen model onto `open`.
 

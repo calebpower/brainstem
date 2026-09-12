@@ -111,10 +111,10 @@ row marked for a later milestone is one that is still refused.
 | `--check-interpreter PATH` | now | probe an interpreter for the one property §2.3 needs |
 | `--dump-abi` | now | print the op table, one row per line |
 | `--selftest` | now | the broker's own checks |
-| `--preopen-dir NAME=PATH` | M4 | a directory your relative paths resolve under |
-| `--preopen-file NAME=PATH:MODE` | M4 | one file, mode `r`, `w`, `rw` or `a` |
-| `--preopen-fd NAME=N` | M4 | inherit one of brainstem's own descriptors — this is how you get the terminal |
-| `--sort-readdir` | M4 | normalise directory order |
+| `--preopen-dir NAME=PATH` | now | a directory your relative paths resolve under |
+| `--preopen-file NAME=PATH:MODE` | now | one file, mode `r`, `w`, `rw` or `a` |
+| `--preopen-fd NAME=N` | now | inherit one of brainstem's own descriptors — this is how you get the terminal |
+| `--sort-readdir` | M7 | normalise directory order |
 | `--preopen-listen NAME=ADDR` | M5 | a bound, listening socket, ready to accept |
 | `--preopen-connect NAME=ADDR` | M5 | an already-connected socket |
 | `--replay FILE` | M7 | re-run against a recorded trace, with no syscalls at all |
@@ -247,10 +247,10 @@ again.
 
 ---
 
-## 6. Three worked programs
+## 6. Five worked programs
 
-These are not written out here by hand. **They are the three fixtures the test
-suite runs**, quoted verbatim, and `tests/run.sh` checks that what appears
+These are not written out here by hand. **They are the fixtures the test suite
+runs**, quoted verbatim, and `tests/run.sh` checks that what appears
 below is byte for byte what is in `bf/`. A guide whose examples are typed out
 separately from the examples that run is a guide with two versions of the
 truth, and the printed one is always the one that rots.
@@ -374,9 +374,172 @@ Under that seed the sixteen bytes are always
 is a ChaCha20 keystream rather than the host's. Without `--seed` they come
 from the kernel and differ every run.
 
-**Writing to a file or a terminal** needs `write` and a preopen, which arrive
-at M4. Until then the broker's own `--trace` is how you see what your program
-did.
+### Make a file, write it, read it back
+
+The M4 fixture, and the one to read if you are about to write anything that
+touches a filesystem. Watch the handles: the first `open` gets handle 2, it is
+closed, and the second `open` gets the same slot back with a new generation,
+so its handle is `0x00010002`. That is §5 made visible — the old handle is not
+merely stale, it is *unforgeable*.
+
+<!-- bf/fs/roundtrip.poke -->
+```
+# roundtrip.poke -- make a file, write it, read it back, rename it, remove it.
+#
+# The M4 fixture: every one of the eleven ops that milestone built, driven by
+# a file containing nothing but the eight brainfuck instructions.
+#
+# It is run against a directory the suite creates fresh, preopened as "work",
+# so the readdir near the end has exactly one entry and the whole trace is a
+# fixed string of bytes.
+#
+# WATCH THE HANDLES. The first open gets index 2 and the handle is simply 2,
+# because a fresh slot has generation 0. It is closed, and the SECOND open
+# gets the same index back -- lowest free first -- but generation 1, so the
+# handle is 0x00010002 and reads "02 00 01 00" on the wire. That is the whole
+# point of ABI.md section 5 made visible: the program cannot accidentally
+# keep using the first handle, because the first handle is not this one.
+#
+# Frames transcribed by hand from ABI.md sections 3, 5, 7.10 to 7.23 and 8.
+#
+#   hello  op 01, len 10, magic "BSTM", want major 1, want minor 0, flags 0
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+#   3 header + 48 record + 12 for one preopen + 5 of name tail ("work")
+READ 68
+#   mkdir  op 16, dir 1, mode 0755 = 0x01ed, path "sub"
+EMIT 16 09 00 01 00 00 00 ed 01 73 75 62
+READ 3
+#   open  op 11, dir 1, flags WRITE|CREATE|TRUNC = 0x0016, mode 0644 = 0x01a4,
+#   path "f".  The reply is a status, a length, and a four byte handle.
+EMIT 11 09 00 01 00 00 00 16 00 a4 01 66
+READ 7
+#   write  op 0b, handle 2, flags 0, data "hi".  The reply is nwritten, which
+#   on OK without NOWAIT is always the length asked for -- the broker retried
+#   any short write itself.
+EMIT 0b 08 00 02 00 00 00 00 00 68 69
+READ 5
+#   close  op 0c, handle 2.  The slot is free and its generation has moved on.
+EMIT 0c 04 00 02 00 00 00
+READ 3
+#   open  op 11, dir 1, flags READ = 0x0001, mode 0, path "f".  Same slot,
+#   next generation: the handle comes back as 0x00010002.
+EMIT 11 09 00 01 00 00 00 01 00 00 00 66
+READ 7
+#   read  op 0a, handle 0x00010002, n 8, flags 0.  Two bytes come back.
+EMIT 0a 08 00 02 00 01 00 08 00 00 00
+READ 5
+#   seek  op 12, handle 0x00010002, offset 0, whence 0 SET.  The reply is the
+#   new position as eight bytes.
+EMIT 12 0d 00 02 00 01 00 00 00 00 00 00 00 00 00 00
+READ 11
+#   close  op 0c, handle 0x00010002
+EMIT 0c 04 00 02 00 01 00
+READ 3
+#   stat  op 13, dir 1, flags 0, path "f".  Thirty two bytes.
+EMIT 13 07 00 01 00 00 00 00 00 66
+READ 35
+#   rename  op 17, olddir 1, newdir 1, oldlen 1, newlen 1, "f" then "g".
+#   Both lengths are in the fixed prefix, so this is a twelve byte header and
+#   two flat runs.
+EMIT 17 0e 00 01 00 00 00 01 00 00 00 01 00 01 00 66 67
+READ 3
+#   unlink  op 15, dir 1, flags 0, path "g"
+EMIT 15 07 00 01 00 00 00 00 00 67
+READ 3
+#   readdir  op 14, dir 1, flags 0.  Only "sub" is left, so this is one entry
+#   of type 2 directory, name length 3.
+EMIT 14 06 00 01 00 00 00 00 00
+READ 10
+#   readdir again: the directory is exhausted and the reply is empty, which
+#   is status END and a zero length rather than a payload to parse
+EMIT 14 06 00 01 00 00 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3
+```
+
+```sh
+mkdir -p work
+brainstem --preopen-dir work=./work -- ./build/bfi roundtrip.bf
+```
+
+### And every way it can say no
+
+<!-- bf/fs/refused.poke -->
+```
+# refused.poke -- every way the filesystem ops say no.
+#
+# Nine refusals in one conversation, and the conversation CONTINUES THROUGH
+# ALL OF THEM. That is the part worth testing: every status here is
+# recoverable, so the error reply carries no payload, the program reads
+# exactly three bytes, and the stream is still in step for the next request.
+# An ABI where a refusal desynced the conversation would be one where a
+# program could not afford to try anything.
+#
+# Run against a directory the suite creates fresh and preopens as "work".
+#
+# Frames transcribed by hand from ABI.md sections 4, 5, 7.10 to 7.23 and 8.
+#
+#   hello  op 01, len 10
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 68
+#   open ".." -- DENIED 04. The only relative component that can leave the
+#   directory, refused anywhere in the path rather than only at the front,
+#   because a/../../b climbs just as well.
+EMIT 11 0a 00 01 00 00 00 01 00 00 00 2e 2e
+READ 3
+#   open "/etc" -- INVAL 06. There are no absolute paths in this ABI at all.
+EMIT 11 0c 00 01 00 00 00 01 00 00 00 2f 65 74 63
+READ 3
+#   open "nope" -- NOENT 05
+EMIT 11 0c 00 01 00 00 00 01 00 00 00 6e 6f 70 65
+READ 3
+#   open "f" with an undeclared flag bit 0x8000 -- INVAL 06. A program built
+#   against a later minor version must not silently get an open without the
+#   flag it asked for.
+EMIT 11 09 00 01 00 00 00 00 80 a4 01 66
+READ 3
+#   read the directory handle itself -- ISDIR 0a. A directory is enumerated
+#   with readdir, never read as bytes; both kernels refuse it and they do not
+#   agree on which errno, which is exactly why this is decided here.
+EMIT 0a 08 00 01 00 00 00 08 00 00 00
+READ 3
+#   open "f" WRITE|CREATE|TRUNC, mode 0644 -- handle 2
+EMIT 11 09 00 01 00 00 00 16 00 a4 01 66
+READ 7
+#   read from it -- DENIED 04. It was opened write only, and rights only ever
+#   narrow: the handle never had READ to lose.
+EMIT 0a 08 00 02 00 00 00 08 00 00 00
+READ 3
+#   readdir on it -- NOTDIR 09, not DENIED. The handle is real and the kind is
+#   wrong, and the most specific true answer is the useful one.
+EMIT 14 06 00 02 00 00 00 00 00
+READ 3
+#   close it
+EMIT 0c 04 00 02 00 00 00
+READ 3
+#   read handle 2 again -- BADF 03. THE DEFECT THE GENERATION TAG EXISTS FOR.
+#   The slot is free and may already have been handed to something else; the
+#   old handle names a generation that no longer exists, so this is a clean
+#   refusal instead of a silent read of someone else's file.
+EMIT 0a 08 00 02 00 00 00 08 00 00 00
+READ 3
+#   close it again -- BADF 03
+EMIT 0c 04 00 02 00 00 00
+READ 3
+#   unlink "f" so the directory is empty again, leaving nothing behind for
+#   the next fixture that runs here
+EMIT 15 07 00 01 00 00 00 00 00 66
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3
+```
+
+Every status in that conversation is **recoverable**: the error reply carries
+no payload, you read exactly three bytes, and the stream is still in step for
+your next request. You can afford to try things.
 
 ---
 

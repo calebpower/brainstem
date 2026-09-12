@@ -289,7 +289,7 @@ Milestones, each ending in a committable unit green on **both** guests.
 | **M1** | the frame codec, alone — no process, no descriptor, no platform. |
 | **M2** | a standard brainfuck program completes a round trip. Three `ctl` ops, which do not cross the seam, so deadlock and timeout are settled at zero platform cost **before twenty more ops inherit them**. |
 | **M3** | **done.** The seam, `clock_now` and `random_bytes`, `--seed` and `--clock`, and the two measured tiers. Four of twenty three. |
-| **M4** | handles, io and fs. |
+| **M4** | **done.** Handles with generations, preopens, and eleven ops: the filesystem and the bytes that move through it. Fifteen of twenty three. |
 | **M5** | net. |
 | **M6** | proc. 23 of 23. |
 | **M7** | the tiers that need all of it: mutation, cross-op metamorphic. ABI frozen. |

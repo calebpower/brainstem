@@ -71,9 +71,36 @@ main write
 ops fprintf
 ops stderr
 
+# ---- preopen.c: command line words into descriptors ----
+preopen strtol
+
 # ---- the seam, and only the seam, reaches the kernel ----
+#
+# This list IS the answer to "what can brainstem do to a machine". Every line
+# is a thing the broker is able to ask of a kernel, and there is no other way
+# for it to ask. Adding one is a review event; the point of measuring it from
+# the objects is that adding one silently is not possible.
 sys_posix errno
 sys_posix clock_gettime
+sys_posix geteuid
+sys_posix getegid
+sys_posix open
+sys_posix openat
+sys_posix close
+sys_posix read
+sys_posix write
+sys_posix lseek
+sys_posix poll
+sys_posix fcntl
+sys_posix fstat
+sys_posix fstatat
+sys_posix mkdirat
+sys_posix unlinkat
+sys_posix renameat
+sys_posix fdopendir
+sys_posix readdir
+sys_posix rewinddir
+sys_posix closedir
 sys_linux errno
 sys_linux syscall
 sys_freebsd arc4random_buf

@@ -16,6 +16,17 @@ bs_err op_ctl_hello(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_ctl_exit (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_time_clock_now(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 bs_err op_rand_bytes(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_io_read (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_io_write(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_io_close(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_io_poll (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_fs_open   (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_fs_seek   (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_fs_stat   (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_fs_readdir(struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_fs_unlink (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_fs_mkdir  (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
+bs_err op_fs_rename (struct bs_ctx *, struct bs_cur *, struct bs_buf *);
 
 static const struct bs_op bs_ops[] = {
 #define OP(c, n, f, q, p) { (c), #n, f, (q), (p) },

@@ -77,6 +77,15 @@ normalise() {
         sub(/^__isoc99_/, "", s)
         sub(/_chk$/, "", s)
         sub(/^__sysv_/, "", s)
+        # The large file aliases, BY NAME. The first version of this line was
+        # sub(/64$/, "", s), which also renamed bs_get_u64 to bs_get_u and
+        # made the codec look like it was calling something external. This
+        # file says two paragraphs above that these lists are written by name
+        # rather than matched by pattern so that adding one is a visible
+        # decision, and then did the opposite; the audit caught it on the
+        # same run.
+        if (s ~ /^(open|openat|lseek|fstat|fstatat|stat|lstat|readdir|fdopendir|scandir|pread|pwrite|ftruncate|truncate|mmap|statvfs|fstatvfs|glob)64$/)
+            sub(/64$/, "", s)
         sub(/^__/, "", s)
         print s
     }'
@@ -254,6 +263,17 @@ EOT
     }
 
     base; expect 0 "a clean listing passes, and a decorated symbol matches its plain name"
+
+    # The large file aliases are undecorated, and NOTHING ELSE ending in 64
+    # is. bs_get_u64 is defined by the codec and must stay internal; a version
+    # of normalise that stripped every trailing 64 turned it into bs_get_u,
+    # which matched no definition and therefore looked external.
+    base
+    echo "frame D bs_get_u64" >> "$d/listing"
+    echo "op_fs U bs_get_u64" >> "$d/listing"
+    echo "sys_posix U openat64" >> "$d/listing"
+    echo "sys_posix openat" >> "$d/allow"
+    expect 0 "openat64 is the alias openat, and bs_get_u64 is not the symbol bs_get_u"
 
     base; echo "op_time U fopen" >> "$d/listing"
     expect 1 "R1 catches a symbol that is not on the allowlist"

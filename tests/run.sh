@@ -21,7 +21,15 @@ cd "$repo"
 
 pass=0; fail=0
 bs_out=${TMPDIR:-/tmp}/bs-run-output.$$
-trap 'rm -f "$bs_out"' EXIT
+
+# Scratch, for the fixtures that need a filesystem and for the observed half
+# of every trace comparison. Fixtures get a directory created FRESH per check:
+# readdir would otherwise depend on whatever the last run left behind, and a
+# fixture that depends on its own history is one that passes until somebody
+# runs it twice.
+BS_TMP=$(mktemp -d)
+export BS_TMP
+trap 'rm -rf "$BS_TMP"; rm -f "$bs_out"' EXIT
 
 # ON FAILURE, SAY WHAT THE CHECK SAID.
 #
@@ -123,7 +131,11 @@ run "HANDOFF's tier table describes the suite" sh tools/bstier.sh
 # worked example that has drifted from the fixture it was copied from teaches a
 # frame layout that no longer exists.
 run "GUIDE's option table and the argument parser agree" sh -c '
-    parsed=$(sed -n "s/.*strcmp(a, \"\(--[a-z][a-z-]*\)\").*/\1/p" src/main.c | sort -u)
+    # grep -o, not sed: three of these options share one line in the
+    # parser, and a line oriented substitution keeps only the last match
+    # on it. The first version of this check silently believed
+    # --preopen-dir did not exist.
+    parsed=$(grep -o "strcmp(a, \"--[a-z][a-z-]*\")" src/main.c | grep -o -- "--[a-z][a-z-]*" | sort -u)
     documented=$(sed -n "s/^| \`\(--[a-z][a-z-]*\)[^|]*| now |.*/\1/p" GUIDE.md | sort -u)
     if [ "$parsed" != "$documented" ]; then
         echo "the parser accepts:"; echo "$parsed"
@@ -132,7 +144,11 @@ run "GUIDE's option table and the argument parser agree" sh -c '
     fi
     exit 0'
 run "no option GUIDE defers to a later milestone is quietly already there" sh -c '
-    parsed=$(sed -n "s/.*strcmp(a, \"\(--[a-z][a-z-]*\)\").*/\1/p" src/main.c | sort -u)
+    # grep -o, not sed: three of these options share one line in the
+    # parser, and a line oriented substitution keeps only the last match
+    # on it. The first version of this check silently believed
+    # --preopen-dir did not exist.
+    parsed=$(grep -o "strcmp(a, \"--[a-z][a-z-]*\")" src/main.c | grep -o -- "--[a-z][a-z-]*" | sort -u)
     rc=0
     for o in $(sed -n "s/^| \`\(--[a-z][a-z-]*\)[^|]*| M[0-9] |.*/\1/p" GUIDE.md); do
         printf "%s\n" "$parsed" | grep -qx "$o" && { echo "$o is deferred in GUIDE but parsed today"; rc=1; }
@@ -391,6 +407,44 @@ run "random_bytes of zero is a legal empty reply, not an error" sh -c '
     got=$(./build/brainstem --trace -- ./build/bfi bf/rand/bytes.bf 2>&1 >/dev/null | grep -c "^brainstem: < 00 len=0$")
     test "$got" = 2'
 
+
+# The eleven M4 ops, in one conversation each. Both fixtures run against a
+# directory created fresh here, which is what makes their traces a fixed
+# string of bytes: readdir would otherwise depend on whatever the last run
+# left behind, and a fixture that depends on its own history is one that
+# passes until somebody runs it twice.
+run "the whole filesystem round trip completes" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    ./build/brainstem --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf >/dev/null 2>&1'
+run "it really wrote the bytes, and really moved and removed the file" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    ./build/brainstem --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf >/dev/null 2>&1
+    test -d "$BS_TMP/work/sub" || { echo "mkdir did not happen"; exit 1; }
+    test ! -e "$BS_TMP/work/f" || { echo "rename left the old name behind"; exit 1; }
+    test ! -e "$BS_TMP/work/g" || { echo "unlink did not happen"; exit 1; }
+    exit 0'
+# The reply to read must be the bytes write was given, not merely the right
+# LENGTH of bytes -- a broker that echoed zeros would pass a length check.
+run "read returns what write was given" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+        | grep -q "< 00 len=2 6869"'
+run "a reused slot comes back with a new generation" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    got=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < 00 len=4 //p" | tr "\n" " ")
+    test "$got" = "02000000 02000100 "'
+run "readdir yields one entry then ends" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    out=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null)
+    printf "%s\n" "$out" | grep -q "< 00 len=7 02030000737562" || { echo "the sub entry is wrong"; exit 1; }
+    printf "%s\n" "$out" | grep -q "^brainstem: < 01 len=0$"  || { echo "the walk did not end"; exit 1; }
+    exit 0'
+run "the preopen table describes the directory it was given" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+        | grep -q "0100000002043f000000000004776f726b"'
+
 # TIER 6
 echo
 echo "== tier 6: error paths =="
@@ -428,6 +482,35 @@ run "an unknown clock id is INVAL rather than a plausible answer" sh -c '
     ./build/brainstem --trace -- ./build/bfi bf/time/badclock.bf 2>&1 >/dev/null | grep -q "< 06 len=0"'
 run "and INVAL is recoverable: the conversation continues past it" sh -c '
     ./build/brainstem --clock frozen=1700000000 -- ./build/bfi bf/time/badclock.bf >/dev/null 2>&1'
+
+
+# Nine refusals in one conversation, and the conversation continues through
+# all of them. Every status here is recoverable: the error reply carries no
+# payload, the program reads exactly three bytes, and the stream is still in
+# step for the next request. An ABI where a refusal desynced the conversation
+# would be one where a program could not afford to try anything.
+run "every filesystem refusal lands on its own status, in order" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    got=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf 2>&1 >/dev/null \
+          | sed -n "s/^brainstem: < \(..\) len=.*/\1/p" | tr "\n" " ")
+    want="00 04 06 05 06 0a 00 04 09 00 03 03 00 00 "
+    if [ "$got" != "$want" ]; then
+        echo "wanted: $want"
+        echo "got:    $got"
+        exit 1
+    fi
+    exit 0'
+run "and the program survives all nine and exits cleanly" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    ./build/brainstem --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf >/dev/null 2>&1'
+# The traversal refusal is the one worth stating on its own, because it is the
+# only one standing in for something the kernel is not yet doing. See
+# sys_beneath_is_kernel() for what that costs and when it changes.
+run "a path with .. in it is refused" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    got=$(./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf 2>&1 >/dev/null \
+          | awk "/^brainstem: > 11 /{f=1;next} f&&/^brainstem: < /{print;exit}")
+    test "$got" = "brainstem: < 04 len=0"'
 
 # TIER 7
 echo
@@ -542,16 +625,22 @@ echo "== tier 10: platform parity =="
 # 0x0040, a stat field that is 32 bits in one place, and an errno that escaped
 # the map. At M3 none of those exist yet, which is exactly when to pin the
 # ones that do.
-BS_NORM='s/^\(brainstem: < 00 len=48 .\{40\}\)../\1%%/'
+# Two masks, and both are named here rather than left for somebody to reverse
+# engineer out of a regex.
+#
+# The hello reply is found by its MAGIC rather than by its length, because its
+# length now depends on how many preopens the run was given. The first version
+# matched len=48 and would have silently stopped matching anything at all the
+# moment a fixture took a preopen -- a mask that matches nothing does not
+# fail, it stops asking, which is the failure mode this whole tier fears.
+#
+# The second mask is stat's mtime, twelve bytes of it. A file's modification
+# time is not a property of the program and cannot be pinned; everything else
+# in the 32 byte record is. stat is the only 32 byte reply the pinned fixtures
+# produce, and the vacuity check below is what keeps both masks honest.
+BS_NORM='s/^\(brainstem: < 00 len=[0-9]* 4253544d.\{32\}\)../\1%%/;s/^\(brainstem: < 00 len=32 .\{24\}\).\{24\}/\1MMMMMMMMMMMMMMMMMMMMMMMM/'
 export BS_NORM
 
-# Somewhere to put the observed trace, so the comparison can be a diff rather
-# than a silent cmp. `cmp -s` was the first version and it told a FreeBSD run
-# nothing at all: the tier failed, printed no bytes, and the machine that
-# could have been asked was already gone.
-BS_TMP=$(mktemp -d)
-export BS_TMP
-trap 'rm -rf "$BS_TMP"; rm -f "$bs_out"' EXIT
 
 run "clock.bf under a frozen clock matches the pinned trace" sh -c '
     ./build/brainstem --trace --clock frozen=1700000000 -- ./build/bfi bf/time/clock.bf 2>&1 >/dev/null \
@@ -573,6 +662,25 @@ run "hello.bf matches the pinned trace" sh -c '
     ./build/brainstem --trace --clock frozen=0 --seed 00000000000000000000000000000000 -- ./build/bfi bf/ctl/hello.bf 2>&1 >/dev/null \
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/ctl.hello.txt "$BS_TMP/obs"'
+
+run "roundtrip.bf matches the pinned trace" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" > "$BS_TMP/obs"
+    diff -u tests/trace/fs.roundtrip.txt "$BS_TMP/obs"'
+run "refused.bf matches the pinned trace" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/refused.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" > "$BS_TMP/obs"
+    diff -u tests/trace/fs.refused.txt "$BS_TMP/obs"'
+# The mtime mask must not eat the rest of the stat record. A file of a
+# different SIZE has to produce a different trace, or the mask is covering
+# more than it says it does.
+run "the stat mask does not swallow the record around it" sh -c '
+    rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
+    ./build/brainstem --trace --preopen-dir work="$BS_TMP/work" -- ./build/bfi bf/fs/roundtrip.bf 2>&1 >/dev/null \
+        | sed "$BS_NORM" | grep -q "^brainstem: < 00 len=32 01010100020000000000000" || exit 1
+    exit 0'
 
 # The one byte the traces above hide, checked here on its own -- and checked
 # against a mapping written HERE rather than read out of the broker, so that
@@ -608,6 +716,20 @@ echo "== tier 10a: the per-op syscall surface =="
 # for the window and tests/syscalls/README for what is pinned and what is
 # still inferred on the primary platform.
 run "every op asks the kernel for exactly what is pinned" sh tools/bscalls.sh
+
+# The filesystem ops are measured here and NOT yet compared against anything,
+# and this is a report rather than a check -- it prints and always passes,
+# which is why it is not a run line and is not counted.
+#
+# The reason is a lesson that cost two round trips. The first freebsd/
+# expectations in this tree were written from what the platform documents
+# rather than from a run, and two of the five were wrong. M4 landed on a host
+# that cannot reach the primary platform, so writing them by hand again would
+# be the same guess a third time. The run that prints these IS the run that
+# produces the expectation: paste them in, and the cases move from a report
+# into the pinned list.
+sh tools/bscalls.sh --report 2>&1 || true
+
 
 # TIER 10b
 echo
