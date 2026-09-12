@@ -497,10 +497,45 @@ for.
   next unit that learns to print fails on the development host instead of on
   the guest.
 
-  The one-character case is worth knowing on its own: clang lowers
-  `fprintf(f, "text")` to `fwrite` and `fprintf(f, "
-")` to **`fputc`**,
-  which is a different symbol again. replay.c has both shapes.
+  The one-character case is worth knowing on its own: clang lowers a
+  conversion-free `fprintf` to `fwrite`, and one whose whole format is a
+  single newline to **`fputc`**, a different symbol again. replay.c has both.
+
+  **AND THEN A SECOND GATE RUN FOUND `bcmp`**, which is the more interesting
+  half. clang rewrites `memcmp(a, b, n) != 0` into `bcmp` -- the result is
+  only compared against zero, so it need not say which way -- and gcc does
+  not. `replay.c` compares a recorded request against the sent one exactly
+  that way.
+
+  That one is NOT an allowlist row and must not become one. `memcmp` is
+  already in IGNORABLE as a pure memory helper; `bcmp` is the same call under
+  the spelling the toolchain preferred, so it belongs in `normalise()` beside
+  the errno and large-file aliases. `bzero` and `bcopy` went in with it. The
+  rule to carry forward: **a symbol that is the compiler saying the same thing
+  differently gets normalised; a symbol that is the program asking for
+  something new gets an allowlist row.** Put one in the other place and the
+  audit stops measuring.
+
+  **This is the one the development host genuinely cannot see.** R8 and R9 are
+  mechanisms, and neither would have caught `bcmp`: there is no clang lane
+  here, and the container is gcc. The honest mitigation is the two-guest gate
+  itself, which is the whole argument for it -- and the cheapest improvement
+  available, not taken here, would be a clang build of the objects purely to
+  run the audit against. It needs no interpreter, no fixtures and no kernel,
+  only `nm`, but it would be a second toolchain definition and that rule is
+  load bearing. Worth a think at M8.
+
+- **A MALFORMED LINE IN THE ALLOWLIST FAILS NOTHING.** While checking the
+  above against the pasted FreeBSD surface, one of my own comments in
+  `tests/audit/allow.txt` turned out to have acquired a literal newline in the
+  middle of it, so the tail of the sentence -- `") into fputc. ...` -- was
+  sitting there as a row. It parses as the pair `") into`, and the reverse
+  direction of R1 skips any pair whose unit is not in the listing, so it was
+  ignored on both platforms.
+
+  R9 now requires every non-comment line to be a row. It was found by hand
+  while looking for something else, which is not a mechanism and does not
+  happen twice.
 
 - **A gate you cannot log in to has to carry its own diagnosis.** M3 came back
   from `freebsd-15.1` with two failing tiers, 10a and 10b. Both of them had

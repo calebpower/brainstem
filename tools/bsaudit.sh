@@ -9,7 +9,7 @@
 # saying "no allocation on the ABI path" is a claim; an empty `nm -u` is a
 # measurement. tools/bscalls.sh is the other half.
 #
-# The eight rules, each named with the defect it exists to catch:
+# The nine rules, each named with the defect it exists to catch:
 #
 #   R1  every external symbol a unit references is on the allowlist, and
 #       every allowlist entry is referenced by something. Catches an op that
@@ -35,6 +35,10 @@
 #       compiler lowerings section is a thing somebody has to remember and
 #       nobody did for five milestones. Catches the next unit that learns to
 #       print, on the development host, instead of on the primary platform.
+#   R9  every non-comment line in the allowlist is a row. Catches a malformed
+#       line, which fails nothing on its own: it becomes a phantom entry that
+#       the reverse direction of R1 skips, in the file that is supposed to be
+#       the complete statement of what this program reaches for.
 #
 # Usage:  sh tools/bsaudit.sh              audit build/obj
 #         sh tools/bsaudit.sh --selftest   prove each rule fires
@@ -91,6 +95,27 @@ normalise() {
         # same run.
         if (s ~ /^(open|openat|lseek|fstat|fstatat|stat|lstat|readdir|fdopendir|scandir|pread|pwrite|ftruncate|truncate|mmap|statvfs|fstatvfs|glob)64$/)
             sub(/64$/, "", s)
+        # The BSD spellings of three pure memory helpers, BY NAME for the same
+        # reason as everything else here. These are not aliases in libc -- they
+        # are what the COMPILER emits for the same source: clang rewrites
+        # memcmp(a, b, n) != 0 into bcmp, because the result is only compared
+        # against zero and bcmp need not say which way, while gcc leaves the
+        # memcmp alone. src/replay.c compares a recorded request against the
+        # sent one exactly that way, and that is how M7 reached freebsd-15.1
+        # with a symbol nothing on the development host could produce.
+        #
+        # They belong here rather than on the allowlist: the allowlist says
+        # what this program ASKED FOR, and it asked for a memory comparison,
+        # which IGNORABLE already covers. A row saying "replay bcmp" would be
+        # a list of whichever compiler happened to run, which is the thing
+        # this whole function exists to stop the allowlist becoming.
+        #
+        # NO APOSTROPHES BELOW THIS LINE, or anywhere in this awk program.
+        # It is single quoted, so one ends the program and the shell reads the
+        # rest of the comment as commands. That is how this edit first went in.
+        if (s == "bcmp")  s = "memcmp"
+        if (s == "bzero") s = "memset"
+        if (s == "bcopy") s = "memmove"
         sub(/^__/, "", s)
         print s
     }'
@@ -213,6 +238,26 @@ audit() {
         say_fail "R7 the linked seam is $seams but build.sh chose $want_seam"
     fi
 
+    # R9 -- every non-comment line in the allowlist is a row.
+    #
+    # A MALFORMED LINE FAILS NOTHING ON ITS OWN, which is why this exists. It
+    # parses as a phantom "unit symbol" pair, and the reverse direction of R1
+    # skips any pair whose unit is not in the listing -- so a broken line sits
+    # there being quietly ignored, in the file that is supposed to be the
+    # complete statement of what this program reaches for.
+    #
+    # One did. A comment in the allowlist acquired a literal newline in the
+    # middle of it, the tail of the sentence became the row `") into`, and the
+    # audit passed on both platforms. It was found by hand while checking
+    # something else, which is not a mechanism and does not happen twice.
+    awk 'NF && $0 !~ /^[[:space:]]*#/ { print FNR ": " $0 }' "$allow" > "$tmp/rows"
+    grep -vE ': *[a-z_][a-z_0-9]* +[a-zA-Z_][a-zA-Z_0-9]*( +\?)? *$' "$tmp/rows" \
+        > "$tmp/badrows" || true
+    if [ -s "$tmp/badrows" ]; then
+        say_fail "R9 the allowlist has a line that is not a row:"
+        sed 's/^/bsaudit:   /' "$tmp/badrows"
+    fi
+
     # R8 -- a unit that is allowed to print is allowed the lowerings of
     # printing.
     #
@@ -332,6 +377,19 @@ EOT
 
     base; echo "op_time U fopen" >> "$d/listing"; echo "op_time fopen ?" >> "$d/allow"
     expect 1 "an optional entry still does not exempt an op from R3"
+
+    # THE ONE THE DEVELOPMENT HOST CANNOT PRODUCE. clang emits bcmp where gcc
+    # emits memcmp, so without the alias this listing is a symbol nothing on
+    # this machine would ever generate -- which is exactly why the self-test
+    # takes a synthetic listing rather than a directory of objects.
+    base; printf '%s
+' 'a comment that lost its hash' >> "$d/allow"
+    expect 1 "R9 catches a line in the allowlist that is not a row"
+
+    base; echo "replay U bcmp" >> "$d/listing"
+    expect 0 "bcmp is the memcmp clang chose, and needs no allowlist row"
+    base; echo "replay U bzero" >> "$d/listing"; echo "replay U bcopy" >> "$d/listing"
+    expect 0 "and bzero and bcopy are memset and memmove"
 
     base; echo "op_time U fputc" >> "$d/listing"; echo "op_time fprintf" >> "$d/allow"
     expect 1 "R8 catches a unit allowed fprintf without the lowerings of it"

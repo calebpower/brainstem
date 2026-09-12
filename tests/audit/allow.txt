@@ -179,10 +179,10 @@ sys_proc _exit
 # wearing a disguise, and does not belong here.
 #
 # fputc is on the list because a ONE CHARACTER conversion-free format is
-# lowered further than a longer one: clang turns fprintf(f, "text") into
-# fwrite and fprintf(f, "
-") into fputc. src/replay.c has both shapes and
-# that is how this section came to be short by a unit.
+# lowered further than a longer one: clang turns a conversion-free fprintf
+# into fwrite, and one whose whole format is a single newline into fputc.
+# src/replay.c has both shapes, and that is how this section came to be short
+# by a unit.
 #
 # WHICH IS THE POINT OF RULE R8. This block is a thing somebody has to
 # remember to extend every time a unit learns to print, and it went five
