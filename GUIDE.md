@@ -999,6 +999,32 @@ right you need — most often you opened a file read-only and then wrote to it.
 Rights only ever narrow, so open it again with the flags you meant. Check the
 feature bits in the hello reply too: they tell you which ops exist at all.
 
+**It never ends, and the broker never returns either.** You are looping on a
+status byte and your loop cannot see that the conversation is over.
+
+`,` at end of input **leaves the cell unchanged** under the default convention
+(§2 and ABI.md's requirement I1 are about the other direction; this is the
+read side). So a loop that clears its status cell and then reads into it sees
+a stale zero when there is nothing to read — and zero is `OK`, the status
+that means carry on. Round it goes, for ever.
+
+**Set the cell to something non-zero before you read the status into it.** A
+real reply overwrites it; no reply at all leaves your value there, and any
+non-zero status ends the loop. In a skeleton that is two characters:
+
+```
+>[-]+,          set the status cell to 1, THEN read into it
+```
+
+Clearing it first is the obvious thing and it is precisely the bug.
+
+This matters more than it looks, because it takes the broker down with you.
+When your program sends `exit`, brainstem answers and then closes your stdin
+so that a program blocked on `,` can finish — and then it *waits* for your
+interpreter. If your program spins instead of ending, the broker waits for
+ever, with nothing printed. It is the worst failure shape either side has, and
+you get it by writing the obvious loop.
+
 **The real debugging tool** is `--trace`:
 
 ```sh

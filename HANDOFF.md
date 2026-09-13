@@ -498,6 +498,35 @@ for.
   claiming invariance for something that is not invariant -- check that before
   hunting for concurrency, and check the dates on both.
 
+- **THE BROKER CAN HANG AFTER ctl.exit, AND NOTHING BOUNDS IT.** Found from
+  the client side, in bfsodium's first program, and it is worth deciding about
+  rather than only recording.
+
+  `bs_child_finish` closes the program's stdin and then calls `waitpid` with
+  no timeout. Closing is right and the comment there says why -- a program
+  blocked on `,` needs end of input to finish. But a program that does NOT
+  finish leaves the broker in `waitpid` for ever, printing nothing.
+
+  That is exactly what happened: a relay loop in bfsodium's `programs/sha256`
+  cleared its status cell before reading into it, so at end of input it read a
+  stale zero, treated it as `OK`, and span. `timeout 1800` killed the pair;
+  brainstem contributed no diagnosis at all, because it was not doing anything
+  wrong by its own lights.
+
+  **The client-side cure is an idiom and is now in GUIDE section 9**: preset
+  the status cell to a non-zero value before reading a status into it, so that
+  "no reply" arrives as a non-`OK` status. Two characters, and any program
+  that loops on a status wants it.
+
+  **The broker-side question is open.** `--op-timeout` bounds every frame read
+  and bounds nothing here. A bounded wait with a diagnosis -- "the program did
+  not exit after its own exit frame" -- would match this project's own
+  standard: tier 9 exists because a suite that can hang is a suite nobody
+  runs, and the same argument is stronger for the broker than for the suite.
+  Against it: shutdown timing is not in the ABI, so this is a behaviour change
+  to a frozen thing, and killing a child that is merely slow would be worse
+  than waiting. It has not been changed. Decide before M8 touches this file.
+
 - **A read returns UP TO n bytes, and two fixtures assumed exactly n.**
   `bf/proc/drive.poke` asked for eight bytes of the child's output and read a
   reply sized for two. The child is an interpreter with unbuffered output, so
