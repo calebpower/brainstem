@@ -34,12 +34,21 @@ status.
     > 10 len=6      wait handle 8
     < 00 len=4      exited, code 0
 
-**Gated: 208 pass, 0 fail on `freebsd-15.1` and 208 pass, 0 fail on
-`ubuntu-26.04`.** M6 was 173 on both guests, M5 was 159, M4 was 148, M3 was
-132, M2 was 94, M0 was 22.
+**Gated: 212 pass, 0 fail on `freebsd-15.1` and 212 pass, 0 fail on
+`ubuntu-26.04`.** That covers the `spawn` deadlock and its regression,
+`bf/proc/orphan`. M7 was first gated at 208, M6 was 173 on both guests, M5 was
+159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
 
-It took three gate runs, all three red on the same tier and none of them on
-the same cause. See the two traps on the compiler lowerings and on `bcmp`
+**The prediction that the syscall pins would survive held.** Marking the
+interpreter's pipes close-on-exec adds two `fcntl` calls, and the first
+attempt put them AFTER the fork -- inside the window `bscalls` measures --
+which turned all nine pinned multisets red on the development host alone.
+Moving them before the fork was the fix, and this gate is what confirms it on
+the platform that could have disagreed. FreeBSD had the last word on `bcmp`
+and could have had one here.
+
+M7 itself took three gate runs, all three red on the same tier and none of
+them on the same cause. See the two traps on the compiler lowerings and on `bcmp`
 below; between them they are the best short answer this project has to why the
 two-guest gate is not optional.
 

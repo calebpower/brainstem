@@ -53,7 +53,7 @@ That is the capability the whole project was for: **brainfuck itself becomes
 the harness**, able to chain another program's primitives without a shell
 script in the middle.
 
-Milestone M7, **gated: 208 pass, 0 fail on `freebsd-15.1` and on
+Milestone M7, **gated: 212 pass, 0 fail on `freebsd-15.1` and on
 `ubuntu-26.04`**, and **`ABI.md` is frozen at 1.0** — its version is checked
 against the constants the broker is compiled with and against the two bytes
 the broker actually puts on the wire, so a document that has drifted from the
