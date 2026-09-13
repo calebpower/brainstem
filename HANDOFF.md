@@ -356,7 +356,7 @@ marker in the suite at all.
 | 6 | yes | 19 | error paths, every status reachable |
 | 7 | yes | 21 | determinism: seed, clocks, sorted walks, and --replay |
 | 8 | yes | 1 | interpreter semantics matrix |
-| 9 | yes | 4 | deadlock and timeout |
+| 9 | yes | 5 | deadlock and timeout, including a spawned child left running |
 | 10 | yes | 13 | platform parity, against traces pinned in tests/trace/ |
 | 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
@@ -498,34 +498,47 @@ for.
   claiming invariance for something that is not invariant -- check that before
   hunting for concurrency, and check the dates on both.
 
-- **THE BROKER CAN HANG AFTER ctl.exit, AND NOTHING BOUNDS IT.** Found from
-  the client side, in bfsodium's first program, and it is worth deciding about
-  rather than only recording.
+- **A SPAWNED CHILD HELD THE CONVERSATION OPEN, AND ALL THREE PROCESSES
+  DEADLOCKED.** Found from the far side, in bfsodium's first program, and it
+  is the worst failure shape this project has: no output, no core, nobody
+  wrong by their own lights.
 
-  `bs_child_finish` closes the program's stdin and then calls `waitpid` with
-  no timeout. Closing is right and the comment there says why -- a program
-  blocked on `,` needs end of input to finish. But a program that does NOT
-  finish leaves the broker in `waitpid` for ever, printing nothing.
+  `child.c` made the interpreter's two pipes with a plain `pipe()`. So a
+  grandchild started by `spawn` inherited the write end of the INTERPRETER's
+  stdin across `execve` — and `bs_child_finish`, which closes the broker's
+  own copy precisely so a program blocked on `,` can finish, no longer gave
+  the interpreter end of input at all. The interpreter blocked on `,`, the
+  broker blocked in `waitpid` for the interpreter, and the grandchild blocked
+  reading a stdin nothing would ever write to.
 
-  That is exactly what happened: a relay loop in bfsodium's `programs/sha256`
-  cleared its status cell before reading into it, so at end of input it read a
-  stale zero, treated it as `OK`, and span. `timeout 1800` killed the pair;
-  brainstem contributed no diagnosis at all, because it was not doing anything
-  wrong by its own lights.
+  Two lines of `fcntl(F_SETFD, FD_CLOEXEC)` fix it, and they go BEFORE the
+  fork for two reasons: the descriptors are then never briefly inheritable,
+  and `bscalls` opens its window AT the fork, so setup calls placed after it
+  would be counted against every op in the ABI. Putting them before changed no
+  pinned multiset on either platform.
 
-  **The client-side cure is an idiom and is now in GUIDE section 9**: preset
-  the status cell to a non-zero value before reading a status into it, so that
-  "no reply" arrives as a non-`OK` status. Two characters, and any program
-  that loops on a status wants it.
+  **It also made a comment true that had been false since M6.** `sys_proc.c`
+  says apply_map closes only 0, 1 and 2 "because everything this broker opened
+  is close-on-exec". These two were the everything else that was not.
 
-  **The broker-side question is open.** `--op-timeout` bounds every frame read
-  and bounds nothing here. A bounded wait with a diagnosis -- "the program did
-  not exit after its own exit frame" -- would match this project's own
-  standard: tier 9 exists because a suite that can hang is a suite nobody
-  runs, and the same argument is stronger for the broker than for the suite.
-  Against it: shutdown timing is not in the ABI, so this is a behaviour change
-  to a frozen thing, and killing a child that is merely slow would be worse
-  than waiting. It has not been changed. Decide before M8 touches this file.
+  **The regression is `bf/proc/orphan.poke`, and it took two goes to make it
+  catch anything.** The child must be deliberately LEFT RUNNING — not written
+  to, not closed, never waited on — where `drive.poke` tidily reaps its own,
+  and tidy is what hides this. And the program must KEEP READING after its
+  exit frame: the first draft stopped there, ran off the end of its
+  instructions, exited without ever needing end of input, and passed whether
+  the pipes were close-on-exec or not.
+
+  **The diagnosis took four wrong turns and they are worth listing**, because
+  each looked settled. It was not the relay being slow: a trace showed all
+  131084 frames done inside 55 seconds with the exit frame sent. It was not a
+  spin from the EOF convention, though that WAS a real second bug in the
+  client and is fixed there. It was not the broker's unbounded `waitpid`,
+  which is where I wrote it up first and was wrong. A reproducer without a
+  `spawn` in it terminated cleanly every time. What finally located it was
+  watching the temporary file and the frame count at intervals: the work was
+  finished at t=55s and the processes then sat for another 220 seconds doing
+  nothing at all.
 
 - **A read returns UP TO n bytes, and two fixtures assumed exactly n.**
   `bf/proc/drive.poke` asked for eight bytes of the child's output and read a

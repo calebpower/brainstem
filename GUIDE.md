@@ -1018,12 +1018,12 @@ non-zero status ends the loop. In a skeleton that is two characters:
 
 Clearing it first is the obvious thing and it is precisely the bug.
 
-This matters more than it looks, because it takes the broker down with you.
-When your program sends `exit`, brainstem answers and then closes your stdin
-so that a program blocked on `,` can finish — and then it *waits* for your
-interpreter. If your program spins instead of ending, the broker waits for
-ever, with nothing printed. It is the worst failure shape either side has, and
-you get it by writing the obvious loop.
+This matters more than it looks. When your program sends `exit`, brainstem
+answers and then closes your stdin so that a program blocked on `,` can
+finish, and then it waits for your interpreter. A program that spins instead
+of ending never lets that wait return, so the broker sits there with nothing
+printed. It is the worst failure shape either side has, and you get it by
+writing the obvious loop.
 
 **The real debugging tool** is `--trace`:
 

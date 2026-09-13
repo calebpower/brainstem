@@ -1,0 +1,69 @@
+# orphan.poke -- spawn a child that will never finish, then exit anyway.
+#
+# THE DEADLOCK THIS EXISTS TO FORBID, and it was real. A spawned child
+# inherited the write end of the INTERPRETER's stdin, because child.c made
+# those two pipes with a plain pipe() and nothing marked them close-on-exec.
+# So when bs_child_finish closed the broker's copy to give the interpreter end
+# of input, the interpreter did not get it: the grandchild was still holding a
+# writer open.
+#
+# Three processes, all blocked, none of them wrong by its own lights. The
+# interpreter waits on ',' for input that cannot arrive. The broker waits in
+# waitpid for the interpreter. The grandchild waits to read a stdin nothing
+# will ever write to. Nobody prints anything. It was found from bfsodium,
+# where a program sent its exit frame, got its reply, and then sat for fifteen
+# minutes.
+#
+# What makes this fixture catch it is that the child is DELIBERATELY LEFT
+# RUNNING. drive.poke writes to its child, closes the pipe, waits for it and
+# collects its status -- a tidy conversation, and tidy is exactly what hides
+# this. Here the child is spawned with a pipe it will block on for ever, and
+# the program exits without writing to it, without closing it and without
+# waiting. The broker must still come back.
+#
+# The suite runs it under a bound. A pass is "this terminated"; there is no
+# output to compare, because the point is the absence of a hang.
+#
+# Run with the broker's working directory set to a scratch directory holding
+# the interpreter and echo.bf, the same way drive.poke is.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.14 to 7.16.
+#
+#   hello  op 01, len 10
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 107
+#   pipe  op 0e, flags 0.  Handles 4 (read) and 5 (write).
+EMIT 0e 02 00 00 00
+READ 11
+#   spawn  op 0f, len 0x30 = 48.  dir ffffffff, flags 0, nfdmap 1, nargv 2,
+#   nenv 1, reserved 0.  The child's stdin is handle 4 and it gets nothing
+#   else -- no stdout, so anything it printed would go nowhere.
+EMIT 0f 30 00 ff ff ff ff 00 00 01 02 01 00
+EMIT 00 04 00 00 00
+#     "bfi", argv "bfi" "echo.bf", env "BFI_EOF=zero"
+EMIT 03 00 62 66 69
+EMIT 03 00 62 66 69
+EMIT 07 00 65 63 68 6f 2e 62 66
+EMIT 0c 00 42 46 49 5f 45 4f 46 3d 7a 65 72 6f
+#     the reply is a process handle: 6
+READ 7
+#   AND NOW LEAVE. Handle 5 is not written to, not closed, and handle 6 is
+#   never waited on. echo.bf is blocked reading a pipe whose only writer is
+#   the broker, which is about to stop being interested.
+#
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3
+#   AND THEN READ ONE MORE BYTE, which is the whole test.
+#
+#   The broker answers the exit frame and then closes this program's stdin so
+#   that a program blocked on ',' can finish. A fixture that STOPPED here
+#   would never test that: it would run off the end of its instructions and
+#   exit on its own, needing no end of input at all -- which is exactly what
+#   the first version of this file did, and it passed whether the pipes were
+#   close-on-exec or not.
+#
+#   So ask for a byte that is never coming. Now the program can only finish if
+#   the close actually reaches it, which it does not when a grandchild is
+#   holding the other end of that pipe open.
+READ 1

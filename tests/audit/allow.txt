@@ -31,6 +31,7 @@ broker write
 
 # ---- child.c: fork, two pipes, exec ----
 child errno
+child fcntl
 child fprintf
 child stderr
 child strerror

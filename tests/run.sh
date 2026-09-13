@@ -1184,6 +1184,36 @@ run "--check-interpreter accepts the vendored interpreter"     ./build/brainstem
 run "--check-interpreter rejects a buffering one" sh -c '
     BFI_FLUSH=block ./build/brainstem --check-interpreter ./build/bfi >/dev/null </dev/null 2>&1; test $? -eq 72'
 
+# A SPAWNED CHILD MUST NOT HOLD THE CONVERSATION OPEN, and until M7 one did.
+#
+# The interpreter's two pipes were made with a plain pipe(), so a grandchild
+# inherited the write end of the interpreter's stdin across execve. Closing the
+# broker's own copy then no longer gave the interpreter end of input, and all
+# three processes blocked: the interpreter on ',', the broker in waitpid for
+# the interpreter, and the grandchild on a stdin nothing would ever write to.
+# No output, no core, no diagnosis from anybody.
+#
+# It was found from bfsodium, whose first program sent an exit frame, got its
+# reply, and then sat for fifteen minutes. src/child.c marks both descriptors
+# close-on-exec now, which is also what makes sys_proc.c's claim about
+# apply_map true rather than merely intended.
+#
+# TWO THINGS MAKE THIS FIXTURE CATCH IT, and it caught nothing without either.
+# The child is deliberately left running -- not written to, not closed, never
+# waited on -- where drive.poke tidily reaps its own. And the program KEEPS
+# READING after its exit frame: a fixture that stopped there would run off the
+# end of its instructions and exit without ever needing end of input, which is
+# what the first draft did, passing whether the pipes were close-on-exec or
+# not.
+run "a spawned child left running does not deadlock the shutdown" sh -c '
+    rm -rf "$BS_TMP/orphan" && mkdir -p "$BS_TMP/orphan"
+    cp build/bfi "$BS_TMP/orphan/bfi" && cp bf/proc/echo.bf "$BS_TMP/orphan/echo.bf"
+    ( cd "$BS_TMP/orphan" && "$BS_R/build/brainstem" --op-timeout 5000 \
+        -- "$BS_R/build/bfi" "$BS_R/bf/proc/orphan.bf" </dev/null ) >/dev/null 2>&1
+    rc=$?
+    test $rc -eq 0 || { echo "the broker exited $rc; 124 or a hang is the defect"; exit 1; }
+    exit 0'
+
 # TIER 10
 echo
 echo "== tier 10: platform parity =="

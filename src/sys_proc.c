@@ -102,7 +102,14 @@ static void apply_map(const bs_fdmap *map, size_t n) {
      * 7.14 to 7.16. Everything this broker opened is close-on-exec, so only
      * the three the child would otherwise inherit from the BROKER's own
      * stdio need dealing with here. A child that kept the broker's stderr
-     * would be writing into the operator's terminal unasked. */
+     * would be writing into the operator's terminal unasked.
+     *
+     * THAT SENTENCE WAS FALSE UNTIL M7 and the failure was a deadlock rather
+     * than a leak. child.c created the interpreter's two pipes with a plain
+     * pipe(), so a grandchild inherited the write end of the interpreter's
+     * stdin -- and then closing the broker's copy no longer gave the
+     * interpreter end of input. See the note in child.c; the fix is there,
+     * and this comment is only true because of it. */
     for (j = 0; j < 3; j++) {
         int named = 0;
         for (i = 0; i < n; i++) if ((int)map[i].child_fd == j) named = 1;
