@@ -60,4 +60,12 @@ int bs_op_arity_ok(const struct bs_op *o, unsigned int len);
 const struct bs_op *bs_op_row(size_t i);
 size_t bs_op_count(void);
 
+/* The interpreter the broker was launched with (--interp, or the default
+ * child.c execs). spawn substitutes it for a zero length path -- ABI.md
+ * section 7.15, added at 1.1 -- so that a program does not have to name the
+ * interpreter it is already running under. Set once by main, read by op_proc
+ * and nothing else. */
+void        bs_op_set_interp(const char *path);
+const char *bs_op_interp(void);
+
 #endif

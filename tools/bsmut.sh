@@ -102,11 +102,11 @@ raw-errno-on-the-wire|sys_posix|s/case ECONNREFUSED:  return BS_CONNREFUSED;/cas
 strict-arity|ops|s/^int bs_op_arity_ok(const struct bs_op \*o, unsigned int len) {/int bs_op_arity_ok(const struct bs_op *o, unsigned int len) { (void)o; (void)len; return 1;/|brainstem self-test
 the-hello-gate|broker|s/st = BS_NOHELLO;/st = BS_OK;/|an op before hello is fatal
 an-empty-path-to-an-fs-op|op_fs|s/if (!allow_empty) return BS_INVAL;//|every filesystem refusal lands on its own status, in order
-an-empty-path-to-spawn|path|s/if (n == 0) return BS_INVAL;//|every process refusal lands on its own status, in order
 dot-and-dotdot|sys_posix|s/if (e->d_name\[0\] == /if (0 \&\& e->d_name[0] == /|readdir yields one entry then ends
 rights-only-narrow|op_io|s/if ((s->rights \& rights) != rights) return BS_DENIED;//|every filesystem refusal lands on its own status, in order
 the-sigpipe-ignore|main|s/signal(SIGPIPE, SIG_IGN);//|the broker survives it rather than dying of SIGPIPE
 the-family-on-the-wire|sys_net|s/a->family = BS_AF_INET6;/a->family = AF_INET6;/|the IPv6 address bind reports
+the-interpreter-substitution|op_proc|s/if (path\[0\] == /if (0 \&\& path[0] == /|spawns the interpreter it is running under
 EOT
 }
 

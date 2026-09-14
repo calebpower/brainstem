@@ -54,7 +54,7 @@ the harness**, able to chain another program's primitives without a shell
 script in the middle.
 
 Milestone M7, **gated: 212 pass, 0 fail on `freebsd-15.1` and on
-`ubuntu-26.04`**, and **`ABI.md` is frozen at 1.0** — its version is checked
+`ubuntu-26.04`**, and **`ABI.md` is frozen at 1.x, currently 1.1** — its version is checked
 against the constants the broker is compiled with and against the two bytes
 the broker actually puts on the wire, so a document that has drifted from the
 binary cannot be committed.

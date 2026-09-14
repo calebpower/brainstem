@@ -6,7 +6,7 @@ is actually built and where it has already bitten.
 
 ## State
 
-**Milestone M7 — the tiers that needed all of it, and the ABI frozen at 1.0.**
+**Milestone M7 — the tiers that needed all of it, and the ABI frozen at 1.0, since raised to 1.1.**
 M7 added no opcodes. What it added was the ability to believe the rest: the
 fixtures' prose is now checked against their hex, five metamorphic relations
 say what each knob is allowed to change, and a mutation sweep breaks thirty
@@ -39,11 +39,12 @@ status.
 `bf/proc/orphan`. M7 was first gated at 208, M6 was 173 on both guests, M5 was
 159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
 
-**The container lane is at 219 and the gate has not seen it.** The seven new
-checks are `bf/net/loopback6` and the two address-record pins it made
-possible, and they are the ones most worth running on the other guest: the
-whole point of that fixture is a constant that differs between the two, so a
-green Linux run is the half of the evidence that was never in doubt.
+**The container lane is at 224 and the gate has not seen it.** Twelve new
+checks across two changes: `bf/net/loopback6` with its two address-record
+pins, and ABI 1.1 with `bf/proc/interp`. The IPv6 one is the one the other
+guest exists for -- the whole point of that fixture is a constant that
+differs between the two, so a green Linux run is the half of the evidence
+that was never in doubt.
 
 **The prediction that the syscall pins would survive held.** Marking the
 interpreter's pipes close-on-exec adds two `fcntl` calls, and the first
@@ -366,7 +367,7 @@ marker in the suite at all.
 | 3a | yes | 3 | fixture legibility, and the expander knows no ABI |
 | 3b | yes | 1 | the header does not lie: tools/bspoke.sh, six rules |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | yes | 28 | per-op round trip, all twenty three ops |
+| 5 | yes | 31 | per-op round trip, all twenty three ops |
 | 5a | yes | 6 | metamorphic: change one knob, require the rest unchanged |
 | 6 | yes | 19 | error paths, every status reachable |
 | 7 | yes | 21 | determinism: seed, clocks, sorted walks, and --replay |
@@ -816,7 +817,7 @@ for.
 
 ## What is next
 
-M0 through M7 are done. Every op is built, `ABI.md` is frozen at 1.0, and
+M0 through M7 are done. Every op is built, `ABI.md` is frozen at 1.x and currently 1.1, and
 and every tier this project declares is running -- which is true for the
 first time, and is true partly because the last one was DELETED rather than
 built.

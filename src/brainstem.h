@@ -33,7 +33,7 @@
 /* The ABI version this broker speaks. Major is never negotiated; a minor
  * mismatch is fine in both directions and both sides operate at the lower. */
 #define BS_VER_MAJOR 1
-#define BS_VER_MINOR 0
+#define BS_VER_MINOR 1
 
 /* Exit codes. The suite asserts on these, so they are contract rather than
  * convenience, and they are spread out rather than sequential so a new one

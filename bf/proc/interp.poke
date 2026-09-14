@@ -1,0 +1,97 @@
+# interp.poke -- drive.poke, except the program does not name the interpreter.
+#
+# WHAT IT PROVES, and it cannot be proved by running it the ordinary way.
+# bf/proc/drive.poke spawns "bfi" by name, which works only because the suite
+# puts a file called bfi in the broker's working directory. That is the
+# defect: the program is naming the interpreter it is ALREADY RUNNING UNDER,
+# and the only name it can know is a literal in its own instruction stream.
+# Start the broker with --interp pointing somewhere else and drive.poke goes
+# on spawning bfi, silently and wrongly.
+#
+# This file sends a ZERO LENGTH PATH instead, which ABI.md section 7.15 gives
+# the meaning "the interpreter the broker was launched with". The suite runs
+# it under an interpreter that is NOT called bfi and is NOT in the working
+# directory, so nothing in this file could name it and the spawn can only
+# succeed through the substitution.
+#
+# IT ASKS FOR MINOR 1 IN THE HANDSHAKE, and that is the whole reason a minor
+# version exists. Against a 1.0 broker a zero length path is INVAL, arriving
+# from spawn in the middle of a conversation and reading like a malformed
+# frame. Asking for 1.1 turns that into a clean VERSION refusal at the
+# handshake, which is where a version problem belongs.
+#
+# The path is two bytes where the name was five. Rule Z pays here as it does
+# everywhere: the correct spelling is also the cheapest one.
+#
+# Everything else is drive.poke. See it for the closes, which are the part
+# that is easy to forget and impossible to debug, and for why the reads ask
+# for one byte at a time.
+#
+# Frames transcribed by hand from ABI.md sections 3, 7.10 to 7.16.
+#
+#   hello  op 01, len 10, want major 1 and MINOR 1 -- see above.
+EMIT 01 0a 00 42 53 54 4d 01 00 01 00 00 00
+READ 107
+#   pipe  op 0e, flags 0.  Handles 4 (read) and 5 (write): the outer program
+#   writes into 5 and the child reads from 4.
+EMIT 0e 02 00 00 00
+READ 11
+#   pipe again.  Handles 6 (read) and 7 (write): the child writes into 7 and
+#   the outer program reads from 6.
+EMIT 0e 02 00 00 00
+READ 11
+#   spawn  op 0f, len 0x32 = 50 -- three less than drive.poke, which is the
+#   difference between a two byte empty path and a five byte "bfi".
+#     dir ffffffff meaning the broker's working directory, flags 0,
+#     nfdmap 2, nargv 2, nenv 1, reserved 0
+EMIT 0f 32 00 ff ff ff ff 00 00 02 02 01 00
+#     the descriptor map: child fd 0 gets handle 4, child fd 1 gets handle 7.
+EMIT 00 04 00 00 00
+EMIT 01 07 00 00 00
+#     THE PATH, u16 prefixed, LENGTH ZERO: the interpreter the broker was
+#     launched with.  There is no name here to be wrong.
+EMIT 00 00
+#     argv: "bfi", "echo.bf".  argv[0] is a LABEL and not a resolution -- it
+#     is what the child sees in its own argv[0] and nothing looks it up -- so
+#     it stays a literal, and the ABI does not reserve a value for it.
+EMIT 03 00 62 66 69
+EMIT 07 00 65 63 68 6f 2e 62 66
+#     env: exactly one variable, "BFI_EOF=zero".  The environment is explicit
+#     and never inherited, so this is the whole of the child's environment --
+#     and echo.bf needs it, because the interpreter's default leaves the cell
+#     unchanged at end of input and its loop would never terminate.
+EMIT 0c 00 42 46 49 5f 45 4f 46 3d 7a 65 72 6f
+#     the reply is a process handle: 8
+READ 7
+#   close the outer copies of the child's two ends.
+EMIT 0c 04 00 04 00 00 00
+READ 3
+EMIT 0c 04 00 07 00 00 00
+READ 3
+#   write  op 0b, handle 5, flags 0, "hi" -- into the child's stdin
+EMIT 0b 08 00 05 00 00 00 00 00 68 69
+READ 5
+#   close handle 5, so the child sees end of input and stops
+EMIT 0c 04 00 05 00 00 00
+READ 3
+#   read  op 0a, handle 6 -- the child's stdout -- ONE BYTE AT A TIME, for
+#   the reason drive.poke sets out at length.
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+#   a third read: the child has exited and closed its end, so this is END
+#   with an empty payload
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 3
+#   wait  op 10, handle 8, flags 0 -- blocking.  state 1 exited, code 0.
+EMIT 10 06 00 08 00 00 00 00 00
+READ 7
+#   close the pipe end and then the process handle.
+EMIT 0c 04 00 06 00 00 00
+READ 3
+EMIT 0c 04 00 08 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

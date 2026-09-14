@@ -24,14 +24,19 @@ READ 3
 #   this ABI can express.
 EMIT 0f 0f 00 ff ff ff ff 00 00 00 00 00 00 03 00 62 66 69
 READ 3
-#   spawn with an EMPTY path -- INVAL 06, and this is the one caller that can
-#   reach src/path.c with a zero length: the filesystem ops refuse an empty
-#   path a layer higher, in path_of, so the rule in path.c is reachable from
-#   here alone. It had no test until a mutation sweep asked which check was
-#   standing behind it and the answer was none.
-EMIT 0f 11 00 ff ff ff ff 00 00 00 01 00 00 00 00
-EMIT 03 00 62 66 69
-READ 3
+#   AN EMPTY PATH USED TO BE REFUSED HERE, and at ABI 1.1 it stopped being a
+#   refusal: it now means "the interpreter the broker was launched with"
+#   (section 7.15), so the case moved to bf/proc/interp.poke, where it is a
+#   success rather than a failure.
+#
+#   What that cost is worth writing down. This was the ONE caller that could
+#   reach src/path.c's zero-length rule -- the filesystem ops refuse an empty
+#   path a layer higher, in path_of -- so that rule appeared to lose its only
+#   test. It did not. The substitution happens BEFORE the path check, so
+#   removing the substitution makes an empty path fall through to exactly that
+#   rule, and tier 11's the-interpreter-substitution row does precisely that.
+#   The rule is still what makes the mutation visible; only the direction of
+#   the test turned over.
 #   spawn whose descriptor map names handle 0x63, which was never issued --
 #   BADF 03. A program can only hand a child a descriptor it holds, and the
 #   generation check means it cannot hand over one it closed.

@@ -1,4 +1,4 @@
-# brainstem ABI — version 1.0
+# brainstem ABI — version 1.1
 
 The normative wire specification. This document is the contract: a client in
 any language is conforming if it speaks what is written here, and the broker is
@@ -13,12 +13,22 @@ document is the reference you come back to for a field width.
 
 ---
 
-## 0. Status: frozen at 1.0
+## 0. Status: frozen at 1.x, currently 1.1
 
 **This document is frozen as of M7.** Every one of the twenty three ops is
 built, every field width below has been measured on both `freebsd-15.1` and
 `ubuntu-26.04`, and the suite compares this file against the implementation in
 both directions rather than trusting either.
+
+**1.1 gave one reserved value a meaning**, which is the third row of the table
+below and therefore a thing the freeze permits rather than an exception to it:
+a zero length path on `spawn` (§7.15) now means *the interpreter the broker was
+launched with*. No conforming 1.0 frame changes meaning, because a zero length
+path was `INVAL`. The defect it removes is in §7.15.
+
+A frozen document that can never change is a document people work around. The
+rule was never "nothing changes"; it is that **the version says what happened**
+and the suite checks the version in three places, one of which is the wire.
 
 What that means in practice:
 
@@ -578,6 +588,29 @@ differ between runs and platforms, and the wire must not.
 Any child descriptor not named in the map is closed. The environment is
 explicit and never inherited: a child gets exactly `nenv` variables. That is a
 capability decision and it removes an obvious replay nondeterminism.
+
+**A zero length path means the interpreter the broker was launched with** —
+`--interp`, or the default of §3 — resolved exactly as if the program had
+named it. Added at **1.1**; at 1.0 a zero length path was `INVAL`, so no
+conforming frame changes meaning.
+
+It exists because of a real defect. A program that wants to spawn a sibling
+interpreter has to name one, and the only name it can know is a literal in its
+own instruction stream — so every such program carried `bfi` in it, and
+`brainstem --interp bfj` ran the program under `bfj` while the program went on
+spawning `bfi`. Silently, and wrongly. **The broker has the string already: it
+chose it, and it used it to start the program that is now asking.** Handing it
+back is the only answer the program cannot get wrong.
+
+Zero is the value to reserve for it under Rule Z — it is the cheapest thing to
+emit in brainfuck, so the correct spelling is also the shortest, `00 00`
+against the five bytes of `03 00 62 66 69`. `argv` is unaffected: `argv[0]` is
+a label rather than a resolution, and the program still supplies it.
+
+A program that depends on this must ask for **minor 1** in its `hello` (§3).
+Against a 1.0 broker that is a clean `VERSION` refusal at the handshake, which
+is where a version problem should be found — rather than an `INVAL` from
+`spawn` halfway through a conversation, which reads as a malformed frame.
 
 `wait`: `proc ‖ flags{u16}` → `state{u8} ‖ code{u8} ‖ signal{u8} ‖ reserved`.
 `state` is 0 running, 1 exited, 2 signalled. **Signal numbers are brainstem's

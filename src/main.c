@@ -404,5 +404,13 @@ int main(int argc, char **argv) {
     }
 
     if (!o.interp || !o.prog) { usage(argv[0]); return BS_EXIT_USAGE; }
+
+    /* spawn substitutes this for a zero length path, so that a program need
+     * not name the interpreter it is already running under. It is set HERE,
+     * after parsing and beside the check that it exists, rather than at each
+     * of the three places above that can assign it -- one of which is the
+     * bare argument after "--", which is how it is usually given. */
+    bs_op_set_interp(o.interp);
+
     return bs_broker_run(&o);
 }

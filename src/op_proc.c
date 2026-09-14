@@ -30,6 +30,23 @@ static bs_err want(bs_u32 h, bs_u16 rights, struct bs_slot **out) {
  * wants to keep one and hand the other to a child -- and reading them in a
  * fixed order costs it nothing while searching for them would cost a
  * comparison brainfuck does not have. */
+/* THE INTERPRETER THE BROKER WAS LAUNCHED WITH, for spawn's zero length path.
+ *
+ * It is a module static with a setter rather than a field on struct bs_ctx,
+ * which is deliberately small -- "an op that needs more than this is reaching
+ * for something that belongs at the platform seam or in the dispatcher" -- and
+ * this is neither. It is a startup argument read by exactly one op, which is
+ * the shape det.c already has for --seed, --clock and --sort-readdir, so it
+ * follows that rather than inventing a second shape.
+ *
+ * It is never null: main sets it before the broker runs, and the default is
+ * the same string child.c execs. A broker that somehow reached spawn without
+ * it would hand execve an empty path, which bs_path_check refuses. */
+static const char *op_interp = "";
+
+void bs_op_set_interp(const char *path) { op_interp = path ? path : ""; }
+const char *bs_op_interp(void) { return op_interp; }
+
 bs_err op_proc_pipe(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep) {
     unsigned int flags;
     bs_osfd rd, wr;
@@ -148,10 +165,37 @@ bs_err op_proc_spawn(struct bs_ctx *ctx, struct bs_cur *req, struct bs_buf *rep)
 
     e = take_string(req, &args, &path);
     if (e != BS_OK) return e;
+
+    /* A ZERO LENGTH PATH MEANS THE INTERPRETER THIS PROGRAM IS RUNNING UNDER.
+     * ABI.md section 7.15, added at 1.1.
+     *
+     * The defect this removes: a program that wanted to spawn a sibling
+     * interpreter had to NAME one, and the only name it could know was a
+     * literal in its own instruction stream. So every such program carried
+     * "bfi" in it, and `brainstem --interp bfj` ran the program under bfj
+     * while the program went on spawning bfi -- silently, and wrongly.
+     *
+     * The broker has the string already; it chose it, and it used it to start
+     * this very program. Handing it back costs nothing and is the only answer
+     * the program cannot get wrong.
+     *
+     * Zero is the right value to reserve for it under Rule Z: it is the
+     * cheapest thing to emit in brainfuck, and a zero length path was
+     * previously INVAL, so no conforming frame changes meaning. bs_path_check
+     * refuses an empty path and its own comment already reserved the idiom --
+     * "an EMPTY path is not the directory itself except where an op says so".
+     * This is an op saying so. */
+    if (path[0] == '\0') path = (char *)bs_op_interp();
+
     /* The same rule the filesystem ops use, from the same place. spawn
      * fchdirs to the directory handle and execs a relative path, so ".."
      * here escapes exactly as it would in open -- and a second copy of the
-     * check is a second thing to get wrong. */
+     * check is a second thing to get wrong.
+     *
+     * The substituted interpreter goes through it too. It is the broker's own
+     * argument rather than the program's, so it is not untrusted -- but an
+     * empty --interp would otherwise reach execve as an empty path, and the
+     * check is the one place that already knows what to say about that. */
     {
         size_t plen = 0;
         while (path[plen]) plen++;

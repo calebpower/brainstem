@@ -7,7 +7,7 @@ write a program against it, and work out why it is not doing what you meant.
 document is the one you read once, in order.
 
 > **All of this runs.** Every one of the twenty three operations is built and
-> `ABI.md` is frozen at 1.0. Every worked example below is a fixture the suite
+> `ABI.md` is frozen at 1.x, currently 1.1. Every worked example below is a fixture the suite
 > executes on `freebsd-15.1` and on `ubuntu-26.04`, and the suite checks that
 > the text here is still the text of the fixture — so an example that had
 > drifted would fail a build rather than waste your afternoon.
@@ -165,6 +165,30 @@ no way to discover anything. ABI.md §8.0 has the full reasoning.
 
 **So: it is not a sandbox.** brainstem runs with your credentials and confines
 nothing. Do not run brainfuck you did not write.
+
+**The one thing you should not name is the interpreter.** If your program
+spawns another brainfuck program, it needs an interpreter to run it under —
+and the only name it could know is one you typed into its instruction stream.
+Which is wrong the moment somebody runs `brainstem --interp somethingelse`:
+your program goes on spawning the name it was born with, silently.
+
+Send a **zero length path** to `spawn` instead and the broker substitutes the
+interpreter it launched *you* under. It is two bytes rather than five, it is
+right by construction, and it is the cheapest thing to emit:
+
+```
+EMIT 00 00          the path: length zero, meaning "the interpreter I am running under"
+```
+
+Ask for **minor 1** in your `hello` if you use it. Against an older broker
+that is a clean `VERSION` refusal at the handshake instead of an `INVAL` from
+`spawn` halfway through a conversation. `bf/proc/interp.poke` is the worked
+example, and the suite runs it under an interpreter deliberately not called
+`bfi`, in a directory with no `bfi` in it, so nothing in the file could have
+named it.
+
+`argv[0]` is unaffected — it is a label the child sees, not something the
+broker looks up, so you still supply it.
 
 ### You always have three handles
 

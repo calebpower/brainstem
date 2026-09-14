@@ -728,6 +728,48 @@ run "the bytes come back through the child" sh -c '
     got=$( (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/drive.bf" </dev/null) 2>&1 >/dev/null \
         | sed -n "s/^brainstem: < 00 len=1 \(..\)$/\1/p" | tr -d "\n")
     test "$got" = "6869"'
+
+# A ZERO LENGTH PATH ON SPAWN, WHICH IS 1.1's ONE ADDITION.
+#
+# THE SCRATCH DIRECTORY DELIBERATELY HAS NO bfi IN IT, and that is the whole
+# design of this check. drive.poke above spawns "bfi" by name and only works
+# because the line above it copies an interpreter there under that name. Here
+# the interpreter is called "notbfi" and lives somewhere else entirely, so
+# there is no name bf/proc/interp.poke could have carried that would resolve
+# -- and the spawn can only succeed by the broker substituting the interpreter
+# it was launched with.
+#
+# The negative half is the next check, because "it worked" is not evidence
+# unless the old way would have failed here.
+#
+# BS_MKINTERP is a command rather than a shell function for the reason
+# BS_MKWALK gives above: every check here runs under `sh -c`, a child shell
+# does not inherit functions, and exporting them is a bashism.
+BS_MKINTERP='rm -rf "$BS_TMP/interp" "$BS_TMP/interpbin" &&
+    mkdir -p "$BS_TMP/interp" "$BS_TMP/interpbin" &&
+    cp "$BS_R/build/bfi" "$BS_TMP/interpbin/notbfi" &&
+    cp "$BS_R/bf/proc/echo.bf" "$BS_TMP/interp/echo.bf"'
+export BS_MKINTERP
+run "a program spawns the interpreter it is running under, without naming it" sh -c '
+    eval "$BS_MKINTERP"
+    (cd "$BS_TMP/interp" && "$BS_R/build/brainstem" --op-timeout 5000 \
+        --interp "$BS_TMP/interpbin/notbfi" -- x "$BS_R/bf/proc/interp.bf" </dev/null) >/dev/null 2>&1'
+run "and the bytes come back through a child nothing could name" sh -c '
+    eval "$BS_MKINTERP"
+    got=$( (cd "$BS_TMP/interp" && "$BS_R/build/brainstem" --op-timeout 5000 --trace \
+        --interp "$BS_TMP/interpbin/notbfi" -- x "$BS_R/bf/proc/interp.bf" </dev/null) 2>&1 >/dev/null \
+        | sed -n "s/^brainstem: < 00 len=1 \(..\)$/\1/p" | tr -d "\n")
+    test "$got" = "6869"'
+# THE NEGATIVE HALF. drive.poke names "bfi", and in this directory there is
+# none -- so it must FAIL here. Without this, the check above would pass on a
+# broker that ignored the empty path and found an interpreter some other way,
+# and would go on passing if somebody put a bfi back in the scratch directory.
+run "and naming the interpreter fails in that same directory, as it must" sh -c '
+    eval "$BS_MKINTERP"
+    if (cd "$BS_TMP/interp" && "$BS_R/build/brainstem" --op-timeout 5000 \
+        --interp "$BS_TMP/interpbin/notbfi" -- x "$BS_R/bf/proc/drive.bf" </dev/null) >/dev/null 2>&1
+    then echo "drive.bf spawned bfi in a directory with no bfi in it"; exit 1; fi
+    exit 0'
 run "the child exits 0 and wait reports it" sh -c '
     rm -rf "$BS_TMP/proc" && mkdir -p "$BS_TMP/proc"
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
@@ -983,7 +1025,7 @@ run "every process refusal lands on its own status, in order" sh -c '
     cp build/bfi "$BS_TMP/proc/bfi" && cp bf/proc/echo.bf "$BS_TMP/proc/echo.bf"
     got=$( (cd "$BS_TMP/proc" && "$BS_R/build/brainstem" --op-timeout 5000 --trace -- "$BS_R/build/bfi" "$BS_R/bf/proc/refused.bf" </dev/null) 2>&1 >/dev/null \
           | sed -n "s/^brainstem: < \(..\) .*/\1/p" | tr "\n" " ")
-    want="00 06 06 06 03 00 00 03 00 00 "
+    want="00 06 06 03 00 00 03 00 00 "
     if [ "$got" != "$want" ]; then
         echo "wanted: $want"
         echo "got:    $got"
