@@ -300,7 +300,7 @@ Milestones, each ending in a committable unit green on **both** guests.
 | **M2** | a standard brainfuck program completes a round trip. Three `ctl` ops, which do not cross the seam, so deadlock and timeout are settled at zero platform cost **before twenty more ops inherit them**. |
 | **M3** | **done.** The seam, `clock_now` and `random_bytes`, `--seed` and `--clock`, and the two measured tiers. Four of twenty three. |
 | **M4** | **done.** Handles with generations and eleven ops: the filesystem and the bytes that move through it. Fifteen of twenty three. |
-| **M5** | **done.** Five net ops, IPv4 and IPv6. No `netecho` helper was needed: the fixture connects to itself, which removes the second process the plan assumed. Twenty of twenty three. |
+| **M5** | **done.** Five net ops, IPv4 and IPv6. No `netecho` helper was needed: the fixture connects to itself, which removes the second process the plan assumed. Twenty of twenty three. **The IPv6 half of that sentence went four milestones without a fixture** — `AF_INET6` being 28 here and 10 there is §3's own headline example, and until `bf/net/loopback6` the only family any fixture sent was the one whose number happens to agree. The rule with the most prose behind it had the least evidence under it. |
 | **M6** | **done.** `pipe`, `spawn`, `wait`. Twenty three of twenty three, and a brainfuck program that runs a brainfuck program. |
 | **M7** | **done.** The tiers that needed all of it. Tier 3b (the header does not lie), tier 5a (metamorphic), tier 11 (mutation, 33 defects each caught by a named check). `--sort-readdir` and `--replay`. ABI.md frozen at 1.0, with the version checked against the binary and against the wire. No new opcodes. |
 | **M8** | there is not one. See below. |

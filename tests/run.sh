@@ -681,6 +681,26 @@ run "accept reports a handle and a 32 byte peer address" sh -c '
     ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback.bf </dev/null 2>&1 >/dev/null \
         | grep -q "^brainstem: < 00 len=36 06000000"'
 
+# THE SAME CONVERSATION OVER IPv6, and the reason it is a separate fixture
+# rather than a parameter is that the family is the thing under test. Until
+# this fixture existed nothing anywhere sent domain 2 -- the rule with the most
+# prose behind it in CONVENTIONS section 3 had the least evidence under it, and
+# the one family every fixture did send was the one whose number happens to
+# agree across the two platforms and therefore cannot fail.
+run "a brainfuck program connects to itself over IPv6" sh -c '
+    ./build/brainstem --op-timeout 5000 -- ./build/bfi bf/net/loopback6.bf >/dev/null </dev/null 2>&1'
+run "the two bytes arrive through the IPv6 socket" sh -c '
+    got=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback6.bf </dev/null 2>&1 >/dev/null \
+        | sed -n "s/^brainstem: < 00 len=1 \(..\)$/\1/p" | tr -d "\n")
+    test "$got" = "7636"'
+run "the IPv6 port the program connects to is the port bind gave it" sh -c '
+    out=$(./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback6.bf </dev/null 2>&1 >/dev/null)
+    bound=$(printf "%s\n" "$out" | sed -n "s/^brainstem: < 00 len=32 ....\(....\).*/\1/p")
+    used=$(printf "%s\n" "$out"  | sed -n "s/^brainstem: > 06 len=38 ................\(....\).*/\1/p")
+    if [ -z "$bound" ] || [ "$bound" = "0000" ]; then echo "bind did not report a port: [$bound]"; exit 1; fi
+    if [ "$bound" != "$used" ]; then echo "bind gave $bound, connect used $used"; exit 1; fi
+    exit 0'
+
 
 # THE PAYOFF. A file containing nothing but the eight brainfuck instructions
 # creates two pipes, starts an interpreter on a SECOND brainfuck program with
@@ -1260,6 +1280,30 @@ run "hello.bf matches the pinned trace" sh -c '
         | sed "$BS_NORM" > "$BS_TMP/obs"
     diff -u tests/trace/ctl.hello.txt "$BS_TMP/obs"'
 
+# AF_INET6 IS 28 ON FREEBSD AND 10 ON LINUX. That is the example this tier's
+# own comment leads with, the example CONVENTIONS section 3 was written around,
+# and until bf/net/loopback6 it was the one divergence in the document with no
+# fixture behind it. These two lines are the check.
+#
+# There is no whole-trace pin because the ephemeral port differs every run, so
+# the four port characters are the only thing not pinned here; every other byte
+# of both address records is a literal in this file. The family byte must read
+# 02 -- brainstem's own number for IPv6, mapped at the seam and dying there --
+# and the sixteen octets must read ::1 in reading order. A seam that leaked the
+# kernel's number would put 1c here on one guest and 0a on the other, and
+# neither would match.
+#
+# The bind reply is the address the kernel actually gave, and the accept reply
+# is the peer address it reports for a connection that really happened. Both
+# come back through the seam, so both are places the leak could occur, and
+# checking only one would leave the other untested.
+run "the IPv6 address bind reports is brainstem's family 2, not the kernel's" sh -c '
+    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback6.bf </dev/null 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=32 0200....00000000000000000000000000000001000000000000000000000000$"'
+run "and so is the peer address accept reports" sh -c '
+    ./build/brainstem --op-timeout 5000 --trace -- ./build/bfi bf/net/loopback6.bf </dev/null 2>&1 >/dev/null \
+        | grep -q "^brainstem: < 00 len=36 060000000200....00000000000000000000000000000001000000000000000000000000$"'
+
 run "roundtrip.bf matches the pinned trace" sh -c '
     rm -rf "$BS_TMP/work" && mkdir -p "$BS_TMP/work"
     (cd "$BS_TMP/work" && "$BS_R/build/brainstem" --trace -- "$BS_R/build/bfi" "$BS_R/bf/fs/roundtrip.bf" </dev/null) 2>&1 >/dev/null \
@@ -1379,7 +1423,7 @@ echo "== tier 11: would these checks catch the bug they claim to? =="
 #
 # tools/bsmut.sh copies the tree, breaks one thing with sed, relinks the
 # broker alone, and runs THIS FILE with BS_ONLY set to the check that
-# mutation is supposed to break -- which must then fail. Thirty three
+# mutation is supposed to break -- which must then fail. Thirty four
 # mutations: one per built op, plus the invariants the ABI rests on.
 #
 # Naming the check is the point. The table in that file is a coverage map,

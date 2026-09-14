@@ -1,0 +1,106 @@
+# loopback6.poke -- the same conversation as loopback.poke, over IPv6.
+#
+# WHY THIS EXISTS, and it is not symmetry. AF_INET6 is 28 on FreeBSD and 10 on
+# Linux. That divergence is the HEADLINE EXAMPLE in the tier 10 table and in
+# CONVENTIONS section 3 -- the case the whole "nothing whose numeric value is
+# chosen by an OS header may appear in a frame" rule was written around -- and
+# until this file there was no fixture anywhere that sent domain 2. The ABI
+# named IPv6 in section 7.5, the seam mapped it, and nothing ever asked.
+#
+# So the rule with the most prose behind it had the least evidence under it.
+# A fixture that sends domain 1 proves the mapping works for the family whose
+# number HAPPENS TO AGREE across the two platforms, which is exactly the case
+# that cannot fail.
+#
+# WHAT IT ACTUALLY CHECKS, since "IPv6 works" is not a claim a test can make.
+# The domain byte on the wire is 02 on both platforms, because 2 is
+# brainstem's own number for IPv6 and not the kernel's. The frames this
+# program emits are therefore byte-identical on FreeBSD and Linux, and tier 10
+# compares them as such. If the seam ever leaked AF_INET6 onto the wire the
+# two guests would disagree by 28 against 10 and the comparison would say so.
+# That is the property; connecting to oneself is merely how it is provoked.
+#
+# THIS FIXTURE NEEDS NO SECOND PROCESS, for the reason loopback.poke gives at
+# length: bind replies with the address actually bound, so the program reads
+# its own ephemeral port out of that reply and emits it back in the connect
+# frame. No helper binary, no agreed port, nothing left running.
+#
+# THE PORT IS CARRIED IN RAW BRAINFUCK, because it is a value and not a
+# literal, and bfgen only ever writes literals. Cell 0 is the working cell
+# every EMIT and READ uses; the two raw blocks below park the port in cells 1
+# and 2 and later read them out.
+#
+# THE ADDRESS IS ::1, SIXTEEN OCTETS IN READING ORDER -- fifteen zero bytes
+# and then 01 -- at offsets 4 to 19 of the address record, with twelve zero
+# bytes of padding after it. The record is 32 bytes for EVERY family, so the
+# bind and connect frames are the same length here as in loopback.poke and
+# only their contents differ. Those zeros cost nothing to emit: '.' on a cell
+# never touched.
+#
+# Frames transcribed by hand from ABI.md sections 3, 6, 7.5 to 7.9 and 7.10.
+#
+#   hello  op 01, len 10.  This program touches no filesystem at all; the
+#   three handles it is given back are the broker's own stdio and it
+#   ignores them.
+EMIT 01 0a 00 42 53 54 4d 01 00 00 00 00 00
+READ 107
+#   socket  op 05, domain 2 IPv6, type 1 stream, protocol 0.  Handle 4 --
+#   handles 1, 2 and 3 are always the broker's stdin, stdout and stderr.
+EMIT 05 03 00 02 01 00
+READ 7
+#   bind  op 07, handle 4, flags 1 REUSEADDR, then the 32 byte address:
+#   family 02, reserved 00, port 0000 meaning "any", then ::1 in READING
+#   ORDER and twelve zero bytes.
+EMIT 07 26 00 04 00 00 00 01 00
+EMIT 02 00 00 00
+EMIT 00 00 00 00 00 00 00 00
+EMIT 00 00 00 00 00 00 00 01
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+#   the reply is status, two length bytes, then the address bound.  Drain the
+#   status, the length, the family and the reserved byte: five bytes.
+READ 5
+#   now the two port bytes, into cells 1 and 2, little endian as they lie
+>,>,<<
+#   and the remaining twenty eight bytes of the address record
+READ 28
+#   listen  op 08, handle 4, backlog 0 meaning 128
+EMIT 08 06 00 04 00 00 00 00 00
+READ 3
+#   socket  op 05 again, domain 2.  Handle 5, the client.
+EMIT 05 03 00 02 01 00
+READ 7
+#   connect  op 06, handle 5, flags 0, family 02, reserved 00 ...
+EMIT 06 26 00 05 00 00 00 00 00 02 00
+#   ... then the port this program was given, straight out of cells 1 and 2 ...
+>.>.<<
+#   ... then ::1 and twelve zeros.
+EMIT 00 00 00 00 00 00 00 00
+EMIT 00 00 00 00 00 00 00 01
+EMIT 00 00 00 00 00 00 00 00 00 00 00 00
+READ 3
+#   accept  op 09, handle 4, flags 0.  The reply is a handle and the peer
+#   address: 3 header + 4 + 32 = 39 bytes.  Handle 6.
+EMIT 09 06 00 04 00 00 00 00 00
+READ 39
+#   write  op 0b, handle 5 (the client end), flags 0, "v6".  Two bytes that
+#   are not loopback.poke's "hi", so a trace tells the two fixtures apart.
+EMIT 0b 08 00 05 00 00 00 00 00 76 36
+READ 5
+#   read  op 0a, handle 6 (the accepted end), ONE BYTE AT A TIME.  A read
+#   returns UP TO n bytes and a stream may deliver them in any grouping it
+#   likes, so asking for two and assuming two is a race waiting for a busier
+#   machine.  See drive.poke, where exactly that happened.
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+EMIT 0a 08 00 06 00 00 00 01 00 00 00
+READ 4
+#   close all three, youngest first
+EMIT 0c 04 00 06 00 00 00
+READ 3
+EMIT 0c 04 00 05 00 00 00
+READ 3
+EMIT 0c 04 00 04 00 00 00
+READ 3
+#   exit  op 02, len 1, code 0
+EMIT 02 01 00 00
+READ 3

@@ -29,7 +29,7 @@
 # build/bfi stay as they were. A mutation tester that rebuilt its own
 # interpreter would be marking its own homework.
 #
-# Cost: about seventy seconds for thirty three mutations on a quiet Linux
+# Cost: about seventy seconds for thirty four mutations on a quiet Linux
 # container, of which most is compiling and the rest is fifteen deliberate
 # desyncs waiting out a timeout. A full build and a full suite per mutation
 # would be twenty minutes, and nobody runs a twenty minute tier. Three things
@@ -106,6 +106,7 @@ an-empty-path-to-spawn|path|s/if (n == 0) return BS_INVAL;//|every process refus
 dot-and-dotdot|sys_posix|s/if (e->d_name\[0\] == /if (0 \&\& e->d_name[0] == /|readdir yields one entry then ends
 rights-only-narrow|op_io|s/if ((s->rights \& rights) != rights) return BS_DENIED;//|every filesystem refusal lands on its own status, in order
 the-sigpipe-ignore|main|s/signal(SIGPIPE, SIG_IGN);//|the broker survives it rather than dying of SIGPIPE
+the-family-on-the-wire|sys_net|s/a->family = BS_AF_INET6;/a->family = AF_INET6;/|the IPv6 address bind reports
 EOT
 }
 
@@ -277,7 +278,7 @@ done
 # the failure being detected, and it is caught correctly; it just costs thirty
 # seconds of wall clock per mutation to notice.
 #
-# Fifteen of the thirty three mutations here are of that shape. The first run
+# Fifteen of the thirty four mutations here are of that shape. The first run
 # of this tool took 517 seconds, of which about 450 were spent waiting for
 # timeouts to expire on defects that were already decided.
 #

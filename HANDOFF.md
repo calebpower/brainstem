@@ -39,6 +39,12 @@ status.
 `bf/proc/orphan`. M7 was first gated at 208, M6 was 173 on both guests, M5 was
 159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
 
+**The container lane is at 219 and the gate has not seen it.** The seven new
+checks are `bf/net/loopback6` and the two address-record pins it made
+possible, and they are the ones most worth running on the other guest: the
+whole point of that fixture is a constant that differs between the two, so a
+green Linux run is the half of the evidence that was never in doubt.
+
 **The prediction that the syscall pins would survive held.** Marking the
 interpreter's pipes close-on-exec adds two `fcntl` calls, and the first
 attempt put them AFTER the fork -- inside the window `bscalls` measures --
@@ -224,7 +230,7 @@ lives in `src/path.c` and both call it.
 
 `tools/bsmut.sh` copies the tree, breaks one thing with sed, relinks the
 broker alone, and runs `tests/run.sh` with `BS_ONLY` set to the check that
-mutation is supposed to break -- which must then go red. Thirty three
+mutation is supposed to break -- which must then go red. Thirty four
 mutations: one per built op, generated from the op table, plus nine
 invariants.
 
@@ -248,7 +254,7 @@ widen rows until the map meant nothing.
 seconds against ten for everything else. The first working version took 517,
 and three mechanisms bought that down: `build.sh --relink` (one unit, not
 twenty one), `BS_ONLY` (one check, not the suite), and lowered timeouts in the
-copy. That last is the interesting one: fifteen of the thirty three mutations
+copy. That last is the interesting one: fifteen of the thirty four mutations
 SHORTEN A REPLY, which does not produce a wrong answer -- it produces a desync
 that sits there until the op timeout fires. 450 of those 517 seconds were
 spent waiting for defects that had already been decided.
@@ -360,13 +366,13 @@ marker in the suite at all.
 | 3a | yes | 3 | fixture legibility, and the expander knows no ABI |
 | 3b | yes | 1 | the header does not lie: tools/bspoke.sh, six rules |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
-| 5 | yes | 25 | per-op round trip, all twenty three ops |
+| 5 | yes | 28 | per-op round trip, all twenty three ops |
 | 5a | yes | 6 | metamorphic: change one knob, require the rest unchanged |
 | 6 | yes | 19 | error paths, every status reachable |
 | 7 | yes | 21 | determinism: seed, clocks, sorted walks, and --replay |
 | 8 | yes | 1 | interpreter semantics matrix |
 | 9 | yes | 5 | deadlock and timeout, including a spawned child left running |
-| 10 | yes | 13 | platform parity, against traces pinned in tests/trace/ |
+| 10 | yes | 15 | platform parity, against traces pinned in tests/trace/ |
 | 10a | yes | 1 | per-op syscall surface, nine cases, both platforms measured |
 | 10b | yes | 1 | the seam is narrow, measured from the objects |
 | 10c | yes | 12 | the tables, the three lanes and the frozen ABI version agree |
