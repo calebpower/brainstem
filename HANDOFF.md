@@ -34,17 +34,23 @@ status.
     > 10 len=6      wait handle 8
     < 00 len=4      exited, code 0
 
-**Gated: 212 pass, 0 fail on `freebsd-15.1` and 212 pass, 0 fail on
-`ubuntu-26.04`.** That covers the `spawn` deadlock and its regression,
-`bf/proc/orphan`. M7 was first gated at 208, M6 was 173 on both guests, M5 was
-159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
+**Gated: 224 pass, 0 fail on `freebsd-15.1` and 224 pass, 0 fail on
+`ubuntu-26.04`.** That covers `bf/net/loopback6` with its two address-record
+pins, ABI 1.1 with `bf/proc/interp`, and the `spawn` deadlock's regression
+`bf/proc/orphan`. M7 was first gated at 208 and then 212, M6 was 173 on both
+guests, M5 was 159, M4 was 148, M3 was 132, M2 was 94, M0 was 22.
 
-**The container lane is at 224 and the gate has not seen it.** Twelve new
-checks across two changes: `bf/net/loopback6` with its two address-record
-pins, and ABI 1.1 with `bf/proc/interp`. The IPv6 one is the one the other
-guest exists for -- the whole point of that fixture is a constant that
-differs between the two, so a green Linux run is the half of the evidence
-that was never in doubt.
+**THE IPv6 RUN IS THE ONE WORTH READING.** `AF_INET6` is 28 on FreeBSD and 10
+on Linux; it is the example the platform parity tier leads with, the example
+CONVENTIONS section 3 was written around, and from M5 to M7 nothing sent
+domain 2 at all. This gate is the first time that constant has been exercised
+on the platform where it is 28 -- and the address records still read family
+`02` in both directions. A green Linux run was the half of that evidence
+nobody doubted; this is the other half.
+
+It also settles a question that could only be answered by running it: the
+FreeBSD guest has `::1` and will bind it. That was the one way these seven
+checks could have gone red for a reason that was not a defect.
 
 **The prediction that the syscall pins would survive held.** Marking the
 interpreter's pipes close-on-exec adds two `fcntl` calls, and the first
