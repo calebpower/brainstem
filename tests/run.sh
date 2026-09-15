@@ -534,6 +534,31 @@ run "the expander knows no opcode and no op name" sh -c '
     body=$(grep -v "^[[:space:]]*#" tools/bfgen.sh)
     ! printf "%s" "$body" | grep -Eqi "hello|ABI\.md|opcode|0x0[1-9]|BSTM"'
 
+# --ANNOTATE, WHICH THIS REPOSITORY DOES NOT USE AND STILL HAS TO TEST.
+#
+# Fixtures here are bare on purpose: a fixture exists to prove a committed
+# file is nothing but the eight instructions, and tools/bsbf refuses any other
+# byte. bfsodium is the caller -- thirty of its routines carry their
+# annotations in the committed .bf and prove the file still portable with its
+# own lint -- so the flag lives here, beside the expander, rather than as a
+# second expander over there.
+#
+# A flag with no check is a flag that works until somebody edits the awk. The
+# property that matters is that annotating CHANGES NO INSTRUCTION: strip
+# everything but the eight bytes from both outputs and they must be equal.
+run "--annotate changes the prose and not one instruction" sh -c '
+    rc=0
+    for s in bf/*/*.poke; do
+        sh tools/bfgen.sh            "$s" | tr -cd "><+-.,[]" > "$1/bare"
+        sh tools/bfgen.sh --annotate "$s" | grep -v "^;" | tr -cd "><+-.,[]" > "$1/ann"
+        cmp -s "$1/bare" "$1/ann" || { echo "$s: --annotate moved an instruction"; rc=1; }
+    done
+    exit $rc' _ "$BS_TMP"
+run "and it does carry the prose" sh -c '
+    sh tools/bfgen.sh --annotate bf/proc/drive.poke | grep -q "^; *THE POINT OF THE WHOLE PROJECT"'
+run "while the default still drops it" sh -c '
+    ! sh tools/bfgen.sh bf/proc/drive.poke | grep -q ";"'
+
 # TIER 3b
 echo
 echo "== tier 3b: the header does not lie =="

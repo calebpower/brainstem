@@ -29,13 +29,37 @@
 # name, and generates no loop. It is closer to the sibling's Rn/Ln expansion
 # than to the transpiler that was deleted, and CONVENTIONS section 6 says so.
 #
-# Usage:  sh tools/bfgen.sh FILE.poke > FILE.bf
+# Usage:  sh tools/bfgen.sh [--annotate] FILE.poke > FILE.bf
+#
+# --ANNOTATE CARRIES THE PROSE THROUGH, as ';' comments above the code each
+# block describes. Off by default, and the default is right for THIS
+# repository: a fixture here exists to prove that a committed file is nothing
+# but the eight instructions, so tools/bsbf refuses any other byte and the
+# prose belongs in the .poke.
+#
+# It is not right everywhere, and that is why the flag exists. bfsodium's
+# thirty routines carry their own annotations in the committed .bf and prove
+# the file still portable with tools/bflint, which compares the instruction
+# stream with ';' comments stripped against the stream with them left in and
+# requires the two to be IDENTICAL. Prose that would execute -- a full stop is
+# '.', a comma is ',' -- is rewritten to safe lookalikes by that lint's --fix.
+# So a commented program can be portable and legible at once, and a library
+# whose whole claim is hand-written readable brainfuck should not have two
+# files in it that are a wall of '+' with no way in.
+#
+# Blank lines are carried through as well, because they are load bearing
+# downstream: bfsodium's tools/bflayout uses a blank line to tell a file
+# header from an annotation, and without them the last line of a header gets
+# dragged onto the first instruction.
 set -eu
 
-[ $# -eq 1 ] || { echo "usage: sh tools/bfgen.sh FILE.poke" >&2; exit 2; }
+ann=0
+if [ "${1:-}" = "--annotate" ]; then ann=1; shift; fi
+
+[ $# -eq 1 ] || { echo "usage: sh tools/bfgen.sh [--annotate] FILE.poke" >&2; exit 2; }
 [ -r "$1" ]  || { echo "bfgen: cannot read $1" >&2; exit 2; }
 
-awk '
+awk -v ann="$ann" '
 function rep(s, n,    _i, _o) { _o = ""; for (_i = 0; _i < n; _i++) _o = _o s; return _o }
 
 # Hex to number, by hand. strtonum() is a gawk extension: Git Bash has gawk
@@ -79,7 +103,16 @@ BEGIN { cur = 0 }
 {
     line = $0
     sub(/[ \t]+$/, "", line)
-    if (line ~ /^[ \t]*#/ || line ~ /^[ \t]*$/) next
+
+    # A comment, and a blank line. Dropped unless --annotate, in which case
+    # the "#" becomes a ";" and the text is left exactly as it was written --
+    # this script rewrites no prose and chooses no layout, the same way it
+    # computes no length and knows no op name.
+    if (line ~ /^[ \t]*#/) {
+        if (ann) { sub(/^[ \t]*#/, "", line); printf ";%s\n", line }
+        next
+    }
+    if (line ~ /^[ \t]*$/) { if (ann) printf "\n"; next }
 
     n = split(line, f, /[ \t]+/)
     # awk splits leading whitespace into an empty first field on some awks

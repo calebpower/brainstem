@@ -370,7 +370,7 @@ marker in the suite at all.
 | 1 | yes | 17 | interpreter self-test, all three EOF modes |
 | 2 | yes | 1 | the program is still brainfuck |
 | 3 | yes | 1 | fixture regeneration |
-| 3a | yes | 3 | fixture legibility, and the expander knows no ABI |
+| 3a | yes | 6 | fixture legibility, and the expander knows no ABI |
 | 3b | yes | 1 | the header does not lie: tools/bspoke.sh, six rules |
 | 4 | yes | 6 | the frame codec in isolation, two implementations |
 | 5 | yes | 31 | per-op round trip, all twenty three ops |
