@@ -109,7 +109,17 @@ BEGIN { cur = 0 }
     # this script rewrites no prose and chooses no layout, the same way it
     # computes no length and knows no op name.
     if (line ~ /^[ \t]*#/) {
-        if (ann) { sub(/^[ \t]*#/, "", line); printf ";%s\n", line }
+        if (ann) {
+            # The whitespace after "#" is collapsed to one space. In a .poke
+            # that indentation is load bearing -- two or more spaces means the
+            # comment annotates the frame below it, and tools/bsframe reads a
+            # skeleton by that rule -- but it is read from the .poke, not from
+            # here. Carried through, it survives into the middle of a
+            # reflowed paragraph as "launched this     program under", which
+            # looks like a mistake because it is one.
+            sub(/^[ \t]*#[ \t]*/, "", line)
+            if (line == "") printf ";\n"; else printf "; %s\n", line
+        }
         next
     }
     if (line ~ /^[ \t]*$/) { if (ann) printf "\n"; next }
