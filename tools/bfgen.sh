@@ -11,6 +11,7 @@
 #
 #   EMIT <hex> ...   write these literal bytes with '.'
 #   READ n           read n bytes with ',' and discard them
+#   R n / L n        n rights, n lefts -- the sibling's Rn/Ln, same reason
 #   LOOP / END       '[' and ']'
 #   anything else beginning with '#' is a comment and is dropped
 #
@@ -147,6 +148,33 @@ BEGIN { cur = 0 }
         printf "%s\n", rep(",", f[start+1] + 0)
         # a read lands in the current cell and overwrites it, so whatever the
         # expander thought was there is no longer true
+        cur = -1
+        next
+    }
+    # Rn and Ln -- n rights, n lefts. The same two directives the sibling
+    # bfexpand has, for the same reason it has them: counting a run of
+    # forty six arrows is drudgery, and miscounting one by a single
+    # character shifts every cell reference after it. That is the worst
+    # failure shape brainfuck has, because the file still runs.
+    #
+    # It was missing here for as long as a .poke only ever stepped a few
+    # cells around a small workspace. A program that keeps a thirty two
+    # byte value on the tape does not: reaching it means a run of a
+    # hundred and fifty arrows, typed by hand, next to another one that
+    # has to match it exactly.
+    #
+    # This adds NO knowledge, which is the line this script does not
+    # cross. It chooses no layout and computes no offset from a name --
+    # every number is still one a person decided and typed, and the tape
+    # map above it in the skeleton is still the only thing that says what
+    # the cell means.
+    if (verb == "R" || verb == "L") {
+        if (f[start+1] !~ /^[0-9]+$/) {
+            printf "bfgen: %s needs a count\n", verb > "/dev/stderr"; bad = 1; exit 2
+        }
+        printf "%s\n", rep(verb == "R" ? ">" : "<", f[start+1] + 0)
+        # The pointer moved, so whatever this expander believed about the
+        # cell under it is no longer true -- exactly as for raw brainfuck.
         cur = -1
         next
     }

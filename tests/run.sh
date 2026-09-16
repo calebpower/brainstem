@@ -559,6 +559,32 @@ run "and it does carry the prose" sh -c '
 run "while the default still drops it" sh -c '
     ! sh tools/bfgen.sh bf/proc/drive.poke | grep -q ";"'
 
+# R AND L, WHICH NO FIXTURE HERE USES AND WHICH ARE STILL THIS EXPANDER'S JOB.
+#
+# The fixtures in bf/ step a few cells around a small workspace and write
+# their arrows literally, which is legible at that size. A PROGRAM that keeps
+# a thirty two byte value on the tape does not: reaching it is a run of a
+# hundred and fifty arrows, typed by hand, beside another run that has to
+# match it exactly -- and a run miscounted by one character shifts every cell
+# reference after it while the file still runs. That is the worst failure
+# shape brainfuck has, and it is the same drudgery bfsodium mechanised with
+# Rn/Ln years before this script existed.
+#
+# So the count is checked, both directions, and the round trip is checked too:
+# R n then L n must be n rights and n lefts and nothing else, because that
+# pairing is what a caller relies on to get home.
+run "R and L emit exactly the arrows asked for" sh -c '
+    printf "R 5\nL 3\n" > "$1/rl.poke"
+    got=$(sh tools/bfgen.sh "$1/rl.poke" | tr -d "\n")
+    test "$got" = ">>>>><<<" || { echo "got [$got]"; exit 1; }
+    exit 0' _ "$BS_TMP"
+run "and a zero count is empty rather than an error" sh -c '
+    printf "R 0\nL 0\n" > "$1/z.poke"
+    test -z "$(sh tools/bfgen.sh "$1/z.poke" | tr -d "\n")"' _ "$BS_TMP"
+run "and a count that is not a number is refused" sh -c '
+    printf "R x\n" > "$1/bad.poke"
+    ! sh tools/bfgen.sh "$1/bad.poke" >/dev/null 2>&1' _ "$BS_TMP"
+
 # TIER 3b
 echo
 echo "== tier 3b: the header does not lie =="
